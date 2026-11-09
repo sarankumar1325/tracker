@@ -2,7 +2,8 @@
 
     python scripts/check_scan.py data/coverage.json data/history.json 5000
 
-Checks: enough packages, every target summarised, few lookup errors, and no target's wheel count
+Checks: the shape scripts/build_lookup.py needs, enough packages, every target summarised, few lookup errors,
+and no target's wheel count
 dropping sharply since the last entry in the history (a PyPI outage, not a real change).
 """
 
@@ -27,6 +28,17 @@ def problems(scan: dict, history: list[dict], top: int) -> list[str]:
     missing = [label for label in labels if label not in scan.get("summary", {})]
     if not labels or missing:
         out.append(f"targets without a summary: {missing or 'no targets at all'}")
+    # What build_lookup.py needs at publish time: catch it here, so bad data is never committed.
+    if scan.get("schema") != 1:
+        out.append(f"schema {scan.get('schema')!r}, expected 1 (update scripts/build_lookup.py first)")
+    fields = ("name", "version", "rank", "pure", "error", "results")
+    for p in scan.get("packages", []):
+        if any(f not in p for f in fields) or not isinstance(p.get("name"), str):
+            out.append(f"package entry missing fields: {p.get('name')!r}")
+            break
+        if len(p["results"]) != len(labels):
+            out.append(f"{p['name']}: {len(p['results'])} results for {len(labels)} targets")
+            break
     errors = scan.get("lookup_errors", sum(1 for p in scan.get("packages", []) if p.get("error")))
     if n and errors > MAX_ERROR_SHARE * n:
         out.append(f"{errors} of {n} lookups failed")
