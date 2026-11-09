@@ -2,8 +2,8 @@
 
     python scripts/build_lookup.py data/coverage.json _site/data/packages
 
-Writes <out>/<name>.json for each package (name canonicalised as in PEP 503) and <out>/index.json
-listing every package and target. Runs at publish time, so the files are never committed.
+Writes <out>/<name>.json for each package (name canonicalised as in PEP 503) and <out>.json
+(e.g. data/packages.json) listing every package and target. Runs at publish time, so the files are never committed.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 # A canonical name is also a safe file name: no slashes, dots or leading dashes.
+SCHEMA = 1  # bump if a field changes meaning or goes away
 SAFE_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 
 
@@ -32,11 +33,12 @@ def build(coverage_path: Path, out: Path) -> int:
     index = {}
     for p in scan["packages"]:
         name = canonical(p["name"])
-        if not SAFE_NAME.fullmatch(name) or name == "index" or name in index:
+        if not SAFE_NAME.fullmatch(name) or name in index:
             print(f"build_lookup: skipping {p['name']!r}", file=sys.stderr)
             continue
         index[name] = p["version"]
         write_json(out / f"{name}.json", {
+            "schema": SCHEMA,
             "name": name,
             "version": p["version"],
             "rank": p["rank"],
@@ -46,7 +48,8 @@ def build(coverage_path: Path, out: Path) -> int:
             "wheelgap": scan["wheelgap"],
             "results": dict(zip(labels, p["results"], strict=True)),
         })
-    write_json(out / "index.json", {
+    write_json(out.with_suffix(".json"), {
+        "schema": SCHEMA,
         "generated": scan["generated"],
         "wheelgap": scan["wheelgap"],
         "targets": scan["targets"],
