@@ -46,7 +46,7 @@ function renderMeta() {
 
 function renderTabs() {
   $("python-tabs").innerHTML = pythons()
-    .map((py) => `<button role="tab" aria-selected="${py === state.python}" data-python="${esc(py)}">Python ${esc(py)}</button>`)
+    .map((py) => `<button role="tab" aria-selected="${py === state.python}" data-python="${esc(py)}">${esc(py)}</button>`)
     .join("");
 }
 
@@ -132,7 +132,11 @@ function renderLookup(query) {
         .map((pl) => `<tr><th scope="row">${esc(PLATFORM_NAMES[pl][0])}</th>${pys.map((py) => cell(py, pl)).join("")}</tr>`)
         .join("")}</tbody>
     </table></div>
-    <p class="sub" style="margin:12px 0 0">Why? <code>uvx wheelgap ${esc(p.name)}==${esc(p.version ?? "")} -p ${esc(state.python)} -t ${esc(state.platform)} --explain</code></p>
+    ${
+      targetIndex(state.python, state.platform) < 0
+        ? ""
+        : `<p class="sub" style="margin:12px 0 0">Why? <code>uvx wheelgap ${esc(p.name)}==${esc(p.version ?? "")} -p ${esc(state.python)} -t ${esc(state.platform)} --explain</code></p>`
+    }
   </div>`;
 }
 
@@ -166,12 +170,10 @@ async function main() {
   state.history = hist;
   state.python = pythons()[0];
   const pkg = readHash();
+  if (pkg) $("search").value = pkg; // before renderAll(), whose writeHash() would otherwise drop it from the URL
   renderMeta();
   renderAll();
-  if (pkg) {
-    $("search").value = pkg;
-    renderLookup(pkg);
-  }
+  if (pkg) renderLookup(pkg);
 
   $("python-tabs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-python]");
