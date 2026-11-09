@@ -1,6 +1,6 @@
 # wheelgap tracker
 
-**Python wheel coverage for the top 5,000 PyPI packages**, across Linux x86_64 and ARM64, Alpine (musl), macOS, Windows x86_64 and ARM64, and Pyodide, for Python 3.13, 3.14 and free-threaded 3.14t.
+**Python wheel coverage for the top 5,000 PyPI packages**, across Linux x86_64 and ARM64, Alpine (musl), macOS, Windows x86_64 and ARM64, and Pyodide, for Python 3.13, 3.14 and 3.15, plus free-threaded 3.14t and 3.15t.
 
 **→ [wheelgap.github.io/tracker](https://wheelgap.github.io/tracker/)**
 
