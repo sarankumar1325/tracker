@@ -147,3 +147,9 @@ footer { margin: 56px auto 40px; color: var(--muted); font-size: 0.85rem; }
   .platforms button { grid-template-columns: 1fr auto; }
   .platforms .bar { grid-column: 1 / -1; grid-row: 2; }
 }
+
+.badge-snippet { margin-top: 16px; }
+.badge-snippet .sub { margin: 0 0 8px; }
+.badge-md { margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg, transparent); overflow-x: auto; font: 0.8rem var(--mono); white-space: pre-wrap; word-break: break-all; }
+.copy-badge { font: 0.85rem var(--sans, inherit); padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: inherit; cursor: pointer; }
+.copy-badge:hover { border-color: var(--text, currentColor); }
