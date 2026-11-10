@@ -90,6 +90,16 @@ h2 { font-size: 1.25rem; margin: 0 0 8px; letter-spacing: -0.01em; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
 .sw-wheel { background: var(--wheel); } .sw-source { background: var(--source); } .sw-missing { background: var(--missing); }
 
+.trends { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.trends li {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+}
+.trends .spark { grid-column: 1 / -1; width: 100%; height: auto; overflow: visible; }
+.spark path { fill: none; stroke: var(--wheel); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.spark circle { fill: var(--wheel); }
+.trends .change { grid-column: 1 / -1; color: var(--muted); font: 0.75rem var(--mono); }
+
 .search { display: flex; gap: 8px; margin: 10px 0 14px; }
 .search input {
   flex: 1; min-width: 0; font: 1rem var(--mono); padding: 10px 12px; color: var(--text);

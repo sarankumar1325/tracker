@@ -78,6 +78,61 @@ function renderPlatforms() {
   $("platforms").innerHTML = rows.join("");
 }
 
+// Share of packages with a wheel for one target label, per history entry that has it.
+function coverageSeries(label) {
+  return state.history
+    .filter((h) => h.summary && h.summary[label] && h.packages)
+    .map((h) => ({ date: h.date, value: (100 * h.summary[label].wheel) / h.packages }));
+}
+
+function sparkline(points, name) {
+  const W = 240, H = 64, PAD = 6;
+  const values = points.map((p) => p.value);
+  let lo = Math.min(...values), hi = Math.max(...values);
+  if (hi - lo < 0.5) {
+    // A flat line would otherwise fill the chart's height with rounding noise.
+    const mid = (hi + lo) / 2;
+    lo = mid - 0.25;
+    hi = mid + 0.25;
+  }
+  const x = (i) => PAD + (i * (W - 2 * PAD)) / (points.length - 1);
+  const y = (v) => H - PAD - ((v - lo) * (H - 2 * PAD)) / (hi - lo);
+  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const dots = points
+    .map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="2.5"><title>${esc(p.date)}: ${p.value.toFixed(1)}%</title></circle>`)
+    .join("");
+  const first = points[0], last = points[points.length - 1];
+  const label = `${name}: ${first.value.toFixed(1)}% on ${first.date}, ${last.value.toFixed(1)}% on ${last.date}`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
+    <path d="${path}"></path>${dots}</svg>`;
+}
+
+function renderTrends() {
+  const dates = [];
+  const rows = state.data.targets
+    .filter((t) => t.python === state.python)
+    .map((t) => {
+      const points = coverageSeries(t.label);
+      if (points.length < 2) return "";
+      dates.push(...points.map((p) => p.date));
+      const [name] = platformName(t.platform);
+      const first = points[0], last = points[points.length - 1];
+      const delta = Number((last.value - first.value).toFixed(1));
+      const change = `${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} points since ${first.date}`;
+      return `<li><span class="pname">${esc(name)}</span>
+        <span class="pct">${last.value.toFixed(1)}%</span>
+        ${sparkline(points, name)}
+        <small class="change">${esc(change)}</small></li>`;
+    })
+    .join("");
+  $("trends").innerHTML = rows;
+  $("trend-section").hidden = !rows;
+  dates.sort();
+  $("trend-note").textContent = rows
+    ? `Share of packages with a wheel for Python ${state.python}, one point per nightly scan from ${dates[0]} to ${dates[dates.length - 1]}. Each chart is scaled to its own range.`
+    : "";
+}
+
 function renderGaps() {
   const i = targetIndex(state.python, state.platform);
   const [name] = platformName(state.platform);
@@ -157,6 +212,7 @@ function writeHash() {
 function renderAll() {
   renderTabs();
   renderPlatforms();
+  renderTrends();
   renderGaps();
   writeHash();
 }
