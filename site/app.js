@@ -159,7 +159,6 @@ function renderGaps() {
   $("more").textContent = `Show more (${fmt(gaps.length - state.shown)} left)`;
 }
 
-
 function canonicalName(name) {
   return name.toLowerCase().replace(/[-_.]+/g, "-");
 }

@@ -5,9 +5,11 @@
 Writes <out>/<name>.json for each package (PEP 503 canonical name). Run at
 publish time; the files are not committed.
 
-Each badge counts platforms that have a wheel for the newest non-free-threaded
-Python in the scan (today: 3.15). Colour: all platforms brightgreen, at least
-three-quarters green, at least half yellow, any orange, none red.
+Each badge counts the native platforms that have a wheel for the newest
+non-free-threaded Python in the scan (today: 3.15, eight platforms). Pyodide is
+left out: its wheels mostly come with Pyodide itself, not from PyPI. Colour: all
+platforms brightgreen, at least three-quarters green, at least half yellow, any
+orange, none red. A package whose lookup failed gets a grey "unknown" badge.
 """
 
 from __future__ import annotations
@@ -52,6 +54,8 @@ def color(wheel: int, total: int) -> str:
 
 
 def badge_for(package: dict, indexes: list[int]) -> dict:
+    if package.get("error"):
+        return {"schemaVersion": 1, "label": "wheels", "message": "unknown", "color": "lightgrey"}
     results = package["results"]
     total = len(indexes)
     wheel = sum(1 for i in indexes if i < len(results) and results[i] == "wheel")
@@ -73,7 +77,7 @@ def build(coverage_path: Path, out: Path) -> int:
     if scan.get("schema") != SCAN_SCHEMA:
         sys.exit(f"build_badges: coverage.json schema {scan.get('schema')!r}, expected {SCAN_SCHEMA}")
     python = newest_non_free_threaded(scan["targets"])
-    indexes = [i for i, t in enumerate(scan["targets"]) if t["python"] == python]
+    indexes = [i for i, t in enumerate(scan["targets"]) if t["python"] == python and t["platform"] != "pyodide"]
     if not indexes:
         sys.exit(f"build_badges: no targets for Python {python}")
     out.mkdir(parents=True, exist_ok=True)
