@@ -171,12 +171,12 @@ function badgeMarkdown(p) {
 }
 
 function renderLookup(query) {
-  const q = query.trim().toLowerCase().replace(/[-_.]+/g, "-");
+  const q = canonicalName(query.trim());
   if (!q) {
     $("lookup").innerHTML = "";
     return;
   }
-  const p = state.data.packages.find((x) => x.name.toLowerCase().replace(/[-_.]+/g, "-") === q);
+  const p = state.data.packages.find((x) => canonicalName(x.name) === q);
   if (!p) {
     $("lookup").innerHTML = `<div class="card"><p class="sub">${esc(query)} isn't in the top ${fmt(state.data.packages.length)}.
       Check it, or any package at a pinned version, locally: <code>uvx wheelgap ${esc(query.trim())} -t all</code></p></div>`;

@@ -34,7 +34,7 @@ It has the package's `name`, `version`, `rank`, `pure` and `error`, the scan's `
 
 ## Badges
 
-Each package has a [shields.io endpoint](https://shields.io/badges/endpoint-badge) badge showing how many of the eight native platforms have a wheel for the newest Python in the scan, e.g. for numpy:
+Each package has a [shields.io endpoint](https://shields.io/badges/endpoint-badge) badge showing how many of the eight native platforms (Pyodide left out) have a wheel for the newest non-free-threaded Python in the scan, labelled with that Python. It's green when every platform has one, then yellow, orange and red as fewer do, and grey `unknown` if the lookup failed. For numpy:
 
 ```markdown
 [![wheels](https://img.shields.io/endpoint?url=https://wheelgap.github.io/tracker/badge/numpy.json)](https://wheelgap.github.io/tracker/#package=numpy)
