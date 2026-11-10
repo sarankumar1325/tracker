@@ -81,7 +81,7 @@ function renderPlatforms() {
 // Share of packages with a wheel for one target label, per history entry that has it.
 function coverageSeries(label) {
   return state.history
-    .filter((h) => h.summary && h.summary[label] && h.packages)
+    .filter((h) => h.summary && h.summary[label] && Number.isFinite(h.summary[label].wheel) && h.packages)
     .map((h) => ({ date: h.date, value: (100 * h.summary[label].wheel) / h.packages }));
 }
 
@@ -98,8 +98,10 @@ function sparkline(points, name) {
   const x = (i) => PAD + (i * (W - 2 * PAD)) / (points.length - 1);
   const y = (v) => H - PAD - ((v - lo) * (H - 2 * PAD)) / (hi - lo);
   const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
-  const dots = points
-    .map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="2.5"><title>${esc(p.date)}: ${p.value.toFixed(1)}%</title></circle>`)
+  // One dot per scan while they fit; after a month only the latest, so the line stays readable.
+  const shown = points.length <= 31 ? points.map((p, i) => [p, i]) : [[points[points.length - 1], points.length - 1]];
+  const dots = shown
+    .map(([p, i]) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="2.5"><title>${esc(p.date)}: ${p.value.toFixed(1)}%</title></circle>`)
     .join("");
   const first = points[0], last = points[points.length - 1];
   const label = `${name}: ${first.value.toFixed(1)}% on ${first.date}, ${last.value.toFixed(1)}% on ${last.date}`;
@@ -223,7 +225,7 @@ async function main() {
     fetch("data/history.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
   ]);
   state.data = data;
-  state.history = hist;
+  state.history = Array.isArray(hist) ? hist.filter((h) => h && typeof h === "object") : [];
   state.python = pythons()[0];
   const pkg = readHash();
   if (pkg) $("search").value = pkg; // before renderAll(), whose writeHash() would otherwise drop it from the URL
