@@ -20,6 +20,8 @@ A package without a wheel for your platform is compiled from source on install (
 - `summary`: per target label, counts of `wheel`, `source` (sdist only, so it builds on install), `missing` (can't install) and `unknown`.
 - `packages`: `rank`, `name`, `version` (the latest release), `downloads` (30 days), `pure` (has a wheel that works everywhere), `error` and `results`.
 
+`data/changes.json` lists, for each night, the packages that gained or lost a wheel since the previous scan: `[{"date", "gained": [...], "lost": [...]}]`, oldest first, for the last 90 days. Each item is `{name, version, target, from, to}`, where `target` is a label from `targets` and `from`/`to` are the results before and after, e.g. `"from": "source", "to": "wheel"`. Only changes to or from `wheel` are listed; a result that was or became `unknown` (a failed lookup) isn't. It's written by [`scripts/update_changes.py`](scripts/update_changes.py).
+
 The data is CC0: use it for anything. The code is MIT.
 
 ## API for scripts and agents
