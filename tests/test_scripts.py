@@ -129,6 +129,12 @@ class CheckScanTests(unittest.TestCase):
         data = scan(packages=[package(i, f"p{i}", error="timeout" if i <= 2 else None) for i in range(1, 21)])
         self.assertEqual(check_scan.problems(data, [], top=20), ["2 of 20 lookups failed"])
 
+    def test_lookup_errors_count_from_the_scan_wins(self):
+        # Real scans record lookup_errors, which takes precedence over counting packages with an error.
+        data = scan(packages=[package(i, f"p{i}") for i in range(1, 21)])
+        data["lookup_errors"] = 2
+        self.assertEqual(check_scan.problems(data, [], top=20), ["2 of 20 lookups failed"])
+
     def test_large_drop_in_wheels(self):
         history = [{"date": "2026-11-09", "summary": {LABELS[0]: {"wheel": 100}, LABELS[1]: {"wheel": 1}}}]
         found = check_scan.problems(scan(wheels=(89, 1)), history, top=3)
