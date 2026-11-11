@@ -33,7 +33,8 @@ PLATFORM_NAMES = {
     "pyodide": "Pyodide (browser)",
 }
 STATUS_TEXT = {"wheel": "wheel", "source": "from source", "missing": "can't install", "unknown": "unknown"}
-CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+# No scripts, fetches or frames: only the stylesheet, the favicon and the inline style on the "Why?" line.
+CSP = "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'"
 
 
 def canonical(name: str) -> str:
@@ -84,7 +85,8 @@ def page(package: dict, scan: dict, python: str) -> str:
     pys = list(dict.fromkeys(t["python"] for t in targets))
     platforms = [pl for pl in PLATFORM_NAMES if any(t["platform"] == pl for t in targets)]
     index = {(t["python"], t["platform"]): i for i, t in enumerate(targets)}
-    columns = {pl: index[(python, pl)] for pl in platforms if (python, pl) in index}
+    # The native platforms, like the badge, so the description and the badge give the same count.
+    columns = {pl: index[(python, pl)] for pl in platforms if pl != "pyodide" and (python, pl) in index}
     e = html.escape
     name, version = package["name"], package["version"] or ""
     title = f"{name} wheel coverage: Linux, Alpine, macOS, Windows, ARM, Pyodide"
@@ -125,7 +127,7 @@ def page(package: dict, scan: dict, python: str) -> str:
   <header class="wrap">
     <p class="eyebrow"><a href="../../">wheelgap tracker</a></p>
     <h1>{e(name)} wheel coverage</h1>
-    <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(str(scan["generated"]))}.</p>
+    <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(str(scan["generated"])[:10])}.</p>
   </header>
   <main class="wrap">
     <div class="card">
@@ -151,12 +153,14 @@ def build(coverage_path: Path, site: Path) -> int:
         sys.exit(f"build_pages: coverage.json schema {scan.get('schema')!r}, expected {SCAN_SCHEMA}")
     python = newest_non_free_threaded(scan["targets"])
     names: list[str] = []
+    seen: set[str] = set()
     for p in scan["packages"]:
         name = canonical(p["name"])
-        if not SAFE_NAME.fullmatch(name) or name in names:
+        if not SAFE_NAME.fullmatch(name) or name in seen:
             print(f"::warning::build_pages: skipping {p['name']!r}", file=sys.stderr)
             continue
         names.append(name)
+        seen.add(name)
         out = site / "p" / name
         out.mkdir(parents=True, exist_ok=True)
         (out / "index.html").write_text(page(p, scan, python), encoding="utf-8")
