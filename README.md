@@ -66,4 +66,6 @@ Each package also has a plain HTML page, e.g. [`p/numpy/`](https://wheelgap.gith
 
 The site is deliberately simple, so it's a good place to start. Ideas and fixes are welcome, as are reports of anything that looks wrong ([open an issue](https://github.com/wheelgap/tracker/issues)). The bigger plan is on the [roadmap](https://github.com/wheelgap/wheelgap/discussions/43).
 
+If you want to help a project ship a missing wheel, see [How to get a missing wheel added upstream](docs/adding-wheels-upstream.md).
+
 The scripts have offline tests in `tests/`: run them with `uvx pytest` (or `python -m unittest discover -s tests`). The [Check](.github/workflows/check.yml) workflow runs them, and `node --check site/app.js`, on every pull request.
