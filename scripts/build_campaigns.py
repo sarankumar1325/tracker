@@ -11,6 +11,7 @@ The pages are plain HTML (no JavaScript) and reuse site/style.css.
 
 from __future__ import annotations
 
+import datetime
 import html
 import json
 import re
@@ -36,10 +37,12 @@ PLATFORM_NAMES = {
 STATUS_TEXT = {"wheel": "wheel", "source": "from source", "missing": "can't install", "unknown": "unknown"}
 CSP = "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'"
 ASK_FIRST = (
-    "Ask upstream first: open one issue on the project's tracker, with a link to this "
-    "campaign and the platforms that are missing, and wait for a maintainer to agree "
-    "before sending a pull request."
+    "Pick one package, not a list. Search its issue tracker first: someone may have asked already. "
+    "If nobody has, open one issue there that links the package's page on this tracker and says which "
+    "wheel is missing, and wait for a maintainer to agree before sending a pull request. Never file the "
+    "same request across many projects at once, and take \"not now\" for an answer."
 )
+CHANGES_KEPT_DAYS = 90  # scripts/update_changes.py trims changes.json to this many days
 
 
 def canonical(name: str) -> str:
@@ -58,6 +61,20 @@ def newest_non_free_threaded(targets: list[dict]) -> str:
     return max(pys, key=python_key)
 
 
+def iso_date(value: object) -> str | None:
+    """A YYYY-MM-DD string for a TOML date or a quoted date, or None if it isn't a real date."""
+    if isinstance(value, datetime.datetime):
+        return None
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            return datetime.date.fromisoformat(value).isoformat()
+        except ValueError:
+            return None
+    return None
+
+
 def load_campaigns(config_path: Path) -> list[dict]:
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
     campaigns = data.get("campaign", [])
@@ -74,10 +91,21 @@ def load_campaigns(config_path: Path) -> list[dict]:
         if ident in seen:
             sys.exit(f"build_campaigns: duplicate campaign id {ident!r}")
         seen.add(ident)
-        if not isinstance(campaign["top"], int) or campaign["top"] < 1:
+        top = campaign["top"]
+        if not isinstance(top, int) or isinstance(top, bool) or top < 1:
             sys.exit(f"build_campaigns: campaign {ident!r} has a bad top count")
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(campaign["start"])):
-            sys.exit(f"build_campaigns: campaign {ident!r} start must be YYYY-MM-DD")
+        start = iso_date(campaign["start"])
+        if start is None:
+            sys.exit(f"build_campaigns: campaign {ident!r} start must be a date, YYYY-MM-DD")
+        campaign["start"] = start
+        python = campaign.get("python")
+        if python is not None and not (isinstance(python, str) and re.fullmatch(r"3\.\d+", python)):
+            sys.exit(f"build_campaigns: campaign {ident!r} python must be like \"3.14\" (not free-threaded)")
+        for field in ("title", "platform", "description", "how_to"):
+            if field in campaign and not isinstance(campaign[field], str):
+                sys.exit(f"build_campaigns: campaign {ident!r} {field} must be a string")
+        if not campaign.get("how_to", "https://").startswith("https://"):
+            sys.exit(f"build_campaigns: campaign {ident!r} how_to must be an https:// URL")
     return campaigns
 
 
@@ -86,10 +114,6 @@ def target_index(targets: list[dict], python: str, platform: str) -> int:
         if target["python"] == python and target["platform"] == platform:
             return i
     sys.exit(f"build_campaigns: no {python} {platform} target in coverage.json")
-
-
-def target_label(targets: list[dict], python: str, platform: str) -> str:
-    return targets[target_index(targets, python, platform)]["label"]
 
 
 def top_packages(scan: dict, top: int) -> list[dict]:
@@ -107,8 +131,19 @@ def has_wheel(package: dict, index: int) -> bool:
 
 
 def coverage_counts(packages: list[dict], index: int) -> tuple[int, int]:
-    wheels = sum(1 for p in packages if has_wheel(p, index))
-    return wheels, len(packages)
+    """Wheels on the target, out of the packages that could be looked up."""
+    checked = [p for p in packages if not p.get("error")]
+    return sum(1 for p in checked if has_wheel(p, index)), len(checked)
+
+
+def native_indexes(targets: list[dict], python: str) -> list[int]:
+    """The campaign Python's targets, apart from Pyodide (which has no compiler and few wheels anywhere)."""
+    return [i for i, t in enumerate(targets) if t["python"] == python and t["platform"] != "pyodide"]
+
+
+def not_started(package: dict, indexes: list[int]) -> bool:
+    """No wheel for this Python on any platform: a new-Python or sdist-only gap, not one for this campaign."""
+    return not package.get("error") and not any(package["results"][i] == "wheel" for i in indexes)
 
 
 def trend(history: list[dict], label: str) -> list[dict]:
@@ -133,10 +168,11 @@ def trend(history: list[dict], label: str) -> list[dict]:
     return rows
 
 
-def todo_list(packages: list[dict], index: int) -> list[dict]:
+def todo_list(packages: list[dict], index: int, indexes: list[int]) -> list[dict]:
+    """Packages that lack a wheel on this target but have one for the same Python elsewhere."""
     rows = []
     for package in packages:
-        if has_wheel(package, index):
+        if package.get("error") or has_wheel(package, index) or not_started(package, indexes):
             continue
         status = package_status(package, index)
         rows.append({
@@ -150,7 +186,10 @@ def todo_list(packages: list[dict], index: int) -> list[dict]:
 
 
 def done_list(changes: list[dict], *, label: str, start: str, top_names: set[str]) -> list[dict]:
-    """Packages in the current top N that gained a wheel on this target on or after start."""
+    """Packages in the current top N that gained a wheel on this target on or after start.
+
+    top_names holds only packages that still have the wheel, so a gain that was lost again isn't listed.
+    """
     seen: set[str] = set()
     rows = []
     for entry in changes:
@@ -214,13 +253,16 @@ def rows_html(items: list[dict], *, kind: str, include_source: bool) -> str:
     for item in items:
         name = item["name"]
         slug = item["canonical"]
+        # build_pages.py skips names that aren't safe in a path, so only link pages that exist.
+        page_link = f'<a href="../../p/{e(slug)}/">{e(name)}</a>' if SAFE_NAME.fullmatch(slug) else e(name)
         pkg = (
-            f'<a href="../../p/{e(slug)}/">{e(name)}</a>'
+            f"{page_link}"
             f' <span class="ver">{e(item["version"])}</span>'
             f' · <a href="https://pypi.org/project/{e(name)}/">PyPI</a>'
         )
         if kind == "done":
-            cells = f'<td>{e(item["date"])}</td><td>{pkg}</td><td>{e(item["frm"])}</td>'
+            was = STATUS_TEXT.get(item["frm"], item["frm"])
+            cells = f'<td>{e(item["date"])}</td><td>{pkg}</td><td>{e(was)}</td>'
         else:
             status = item["status"]
             label = "lookup failed" if status == "error" else STATUS_TEXT.get(status, status)
@@ -269,23 +311,47 @@ def page(campaign: dict, scan: dict, history: list, changes: list, python: str) 
     index = target_index(scan["targets"], python, platform)
     label = scan["targets"][index]["label"]
     packages = top_packages(scan, top)
+    indexes = native_indexes(scan["targets"], python)
     wheels, total = coverage_counts(packages, index)
     share = percent(wheels, total)
-    todo = todo_list(packages, index)
+    compiled = [p for p in packages if not p.get("pure")]
+    compiled_wheels, compiled_total = coverage_counts(compiled, index)
+    errors = [p for p in packages if p.get("error")]
+    waiting = [p for p in packages if not_started(p, indexes)]
+    todo = todo_list(packages, index, indexes)
     include_source = any(source_url(p) for p in scan["packages"])
     if include_source:
         for item in todo:
             item["source"] = source_url(next(p for p in packages if p["name"] == item["name"]))
-    done = done_list(changes, label=label, start=campaign["start"], top_names={p["name"] for p in packages})
+    still_has_wheel = {p["name"] for p in packages if has_wheel(p, index)}
+    done = done_list(changes, label=label, start=campaign["start"], top_names=still_has_wheel)
     platform_name = PLATFORM_NAMES.get(platform, platform)
     title = campaign["title"]
     url = f"{BASE_URL}campaigns/{campaign['id']}/"
     summary = (
-        f"{wheels} of the top {total} packages ship {article(platform_name)} {platform_name} wheel on Python {python} "
+        f"{wheels} of the top {top} packages ship {article(platform_name)} {platform_name} wheel on Python {python} "
         f"({share}). {len(todo)} still need one."
     )
+    lede = campaign.get("description") or (
+        f"This page turns the {platform_name} ({platform}) gaps among the most-downloaded packages into a list "
+        "people can work through, one package at a time."
+    )
+    checked_note = f" {len(errors)} couldn't be looked up in this scan and aren't counted." if errors else ""
+    waiting_html = ""
+    if waiting:
+        names = ", ".join(e(p["name"]) for p in waiting)
+        waiting_html = (
+            f'      <p class="note">Left out: {len(waiting)} {"package has" if len(waiting) == 1 else "packages have"} '
+            f"no Python {e(python)} wheel on any platform yet ({names}). That's a new-Python or sdist-only gap "
+            f"for the project as a whole, not one this campaign should ask about.</p>\n"
+        )
     how_to = campaign.get("how_to")
     how_to_html = f' <a href="{e(how_to)}">How to ask for a missing wheel</a>.' if how_to else ""
+    python_why = (
+        " (set by the campaign)"
+        if campaign.get("python")
+        else " (the newest non-free-threaded Python, as the badges use)"
+    )
     generated = str(scan["generated"])[:10]
     return f"""<!doctype html>
 <html lang="en">
@@ -303,21 +369,22 @@ def page(campaign: dict, scan: dict, history: list, changes: list, python: str) 
   <header class="wrap">
     <p class="eyebrow"><a href="../../">wheelgap tracker</a></p>
     <h1>{e(title)}</h1>
-    <p class="lede">{e(platform_name)} ({e(platform)}) is one of the thinnest native platforms on the tracker, and it is what you get with <code>python:*-alpine</code> images on Graviton and Apple-silicon CI. This page turns that gap into a list people can work through.</p>
-    <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(generated)}, using Python {e(python)} (the newest non-free-threaded Python, as the badges do).</p>
+    <p class="lede">{e(lede)}</p>
+    <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(generated)}, using Python {e(python)}{python_why}.</p>
   </header>
   <main class="wrap">
     <section>
       <h2>Coverage</h2>
-      <p><strong>{e(share)}</strong> of the top {total} packages have {e(article(platform_name))} {e(platform_name)} wheel today ({wheels:,} of {total:,}).</p>
+      <p><strong>{e(share)}</strong> of the top {top} packages have {e(article(platform_name))} {e(platform_name)} wheel today ({wheels:,} of {total:,}).{checked_note}</p>
+      <p>Pure-Python packages have a wheel for every platform, so that share flatters it. Of the {compiled_total:,} with compiled code, <strong>{e(percent(compiled_wheels, compiled_total))}</strong> have one ({compiled_wheels:,} of {compiled_total:,}).</p>
 {trend_html(trend(history, label), label)}    </section>
     <section>
       <h2>To do</h2>
-      <p class="note">{len(todo)} of the top {top} packages still have no {e(platform_name)} wheel, most-downloaded first.{how_to_html} {e(ASK_FIRST)}</p>
-{rows_html(todo, kind="todo", include_source=include_source)}    </section>
+      <p class="note">{len(todo)} of the top {top} packages have Python {e(python)} wheels for other platforms but not {e(platform_name)}, most-downloaded first. {e(ASK_FIRST)}{how_to_html}</p>
+{rows_html(todo, kind="todo", include_source=include_source)}{waiting_html}    </section>
     <section>
       <h2>Done</h2>
-      <p class="note">Packages in the current top {top} that gained {e(article(platform_name))} {e(platform_name)} wheel on or after {e(campaign["start"])}, from the nightly change log.</p>
+      <p class="note">Packages in the current top {top} that gained {e(article(platform_name))} {e(platform_name)} wheel on or after {e(campaign["start"])} and still have it, from the nightly change log (which keeps the last {CHANGES_KEPT_DAYS} days).</p>
 {rows_html(done, kind="done", include_source=False)}    </section>
   </main>
 </body>
@@ -353,9 +420,10 @@ def build(coverage_path: Path, history_path: Path, changes_path: Path, config_pa
     history = json.loads(history_path.read_text(encoding="utf-8")) if history_path.exists() else []
     changes = json.loads(changes_path.read_text(encoding="utf-8")) if changes_path.exists() else []
     campaigns = load_campaigns(config_path)
-    python = newest_non_free_threaded(scan["targets"])
+    newest = newest_non_free_threaded(scan["targets"])
     urls: list[str] = []
     for campaign in campaigns:
+        python = campaign.get("python") or newest
         ident = campaign["id"]
         out = site / "campaigns" / ident
         out.mkdir(parents=True, exist_ok=True)

@@ -15,7 +15,7 @@ CONFIG = """
 id = "musl-aarch64"
 title = "musllinux aarch64 wheels for the top 500"
 platform = "musl-aarch64"
-top = 2
+top = 5
 start = "2026-11-10"
 how_to = "https://github.com/wheelgap/tracker/blob/main/docs/adding-wheels-upstream.md"
 """
@@ -41,16 +41,24 @@ class CampaignTests(unittest.TestCase):
                 {"label": "3.13 musl-aarch64", "python": "3.13", "platform": "musl-aarch64"},
                 {"label": "3.14t musl-aarch64", "python": "3.14t", "platform": "musl-aarch64"},
                 {"label": "3.15 musl-aarch64", "python": "3.15", "platform": "musl-aarch64"},
+                {"label": "3.15 linux-x86_64", "python": "3.15", "platform": "linux-x86_64"},
+                {"label": "3.15 pyodide", "python": "3.15", "platform": "pyodide"},
             ],
+            # Top 5: NumPy and requests have the wheel; psycopg2 is a real musl-aarch64 gap; newpy has no
+            # 3.15 wheel on any platform (only Pyodide doesn't count); failed couldn't be looked up.
             "packages": [
-                {"rank": 1, "name": "NumPy", "version": "2.0", "error": None,
-                 "results": ["wheel", "source", "source", "wheel"]},
-                {"rank": 2, "name": "psycopg2", "version": "2.9", "error": None,
-                 "results": ["wheel", "source", "source", "source"]},
-                {"rank": 3, "name": "outside-top", "version": "1.0", "error": None,
-                 "results": ["wheel", "missing", "missing", "missing"]},
-                {"rank": 4, "name": "failed", "version": None, "error": "lookup failed",
-                 "results": ["unknown", "unknown", "unknown", "unknown"]},
+                {"rank": 1, "name": "NumPy", "version": "2.0", "error": None, "pure": False,
+                 "results": ["wheel", "source", "source", "wheel", "wheel", "source"]},
+                {"rank": 2, "name": "psycopg2", "version": "2.9", "error": None, "pure": False,
+                 "results": ["wheel", "source", "source", "source", "wheel", "source"]},
+                {"rank": 3, "name": "requests", "version": "2.32", "error": None, "pure": True,
+                 "results": ["wheel", "wheel", "wheel", "wheel", "wheel", "wheel"]},
+                {"rank": 4, "name": "newpy", "version": "1.0", "error": None, "pure": False,
+                 "results": ["wheel", "wheel", "source", "source", "source", "wheel"]},
+                {"rank": 5, "name": "failed", "version": None, "error": "lookup failed", "pure": False,
+                 "results": ["unknown", "unknown", "unknown", "unknown", "unknown", "unknown"]},
+                {"rank": 6, "name": "outside-top", "version": "1.0", "error": None, "pure": False,
+                 "results": ["wheel", "missing", "missing", "missing", "wheel", "missing"]},
             ],
         }
         self.history_data = [
@@ -67,6 +75,7 @@ class CampaignTests(unittest.TestCase):
                 {"name": "NumPy", "version": "2.0", "target": "3.15 musl-aarch64", "from": "source", "to": "wheel"},
                 {"name": "outside-top", "version": "1.0", "target": "3.15 musl-aarch64", "from": "missing", "to": "wheel"},
                 {"name": "psycopg2", "version": "2.9", "target": "3.15 linux-x86_64", "from": "source", "to": "wheel"},
+                {"name": "newpy", "version": "1.0", "target": "3.15 musl-aarch64", "from": "missing", "to": "wheel"},
             ], "lost": []},
         ]
 
@@ -83,17 +92,73 @@ class CampaignTests(unittest.TestCase):
         )
         return (self.site / "campaigns" / "musl-aarch64" / "index.html").read_text(encoding="utf-8")
 
+    def todo(self, page: str) -> str:
+        return page.split(">To do</h2>", 1)[1].split("Left out:", 1)[0]
+
     def test_uses_newest_non_free_threaded_python_and_top_n(self):
         page = self.built_page()
-        # 3.15, not 3.14t or 3.13: NumPy has a wheel, psycopg2 does not, so 1 of 2.
+        # 3.15, not 3.14t or 3.13. Of the 4 looked up, NumPy and requests have the wheel: 2 of 4.
         self.assertIn("Python 3.15", page)
         self.assertNotIn("3.14t", page)
         self.assertIn("<strong>50%</strong>", page)
-        self.assertIn("1 of 2", page)
-        self.assertIn("psycopg2", page)
+        self.assertIn("(2 of 4)", page)
+        self.assertIn("psycopg2", self.todo(page))
         self.assertIn("from source", page)
         self.assertNotIn("outside-top", page)
-        self.assertNotIn("failed", page)
+
+    def test_headline_also_counts_compiled_packages_only(self):
+        page = self.built_page()
+        # requests is pure Python; NumPy, psycopg2 and newpy have compiled code, and only NumPy has the wheel.
+        self.assertIn("Of the 3 with compiled code, <strong>33.3%</strong> have one (1 of 3)", page)
+
+    def test_lookup_errors_are_left_out_and_said(self):
+        page = self.built_page()
+        self.assertIn("1 couldn't be looked up in this scan and aren't counted", page)
+        self.assertNotIn("failed", self.todo(page))
+        self.assertNotIn("s-error", page)
+
+    def test_packages_with_no_wheels_for_the_python_are_left_out_of_to_do(self):
+        page = self.built_page()
+        todo = self.todo(page)
+        self.assertNotIn("newpy", todo)
+        left_out = page.split("Left out:", 1)[1].split("</p>", 1)[0]
+        self.assertIn("1 package has no Python 3.15 wheel on any platform yet (newpy)", left_out)
+
+    def test_campaign_python_overrides_the_newest(self):
+        self.config.write_text(CONFIG + 'python = "3.13"\n', encoding="utf-8")
+        page = self.built_page()
+        self.assertIn("using Python 3.13 (set by the campaign)", page)
+        # On 3.13 musl-aarch64 only requests and newpy have the wheel.
+        self.assertIn("(2 of 4)", page)
+
+    def test_bad_campaign_values_are_rejected(self):
+        for line in ('python = "3.14t"', "python = 3.14", 'start = "2026-13-45"', "top = true",
+                     'how_to = "http://example.com"', "description = 1"):
+            with self.subTest(line=line):
+                key = line.split(" ", 1)[0]
+                config = "\n".join(x for x in CONFIG.splitlines() if not x.startswith(key + " "))
+                self.config.write_text(config + "\n" + line + "\n", encoding="utf-8")
+                self.write_inputs()
+                with self.assertRaises(SystemExit):
+                    build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
+
+    def test_bare_toml_date_for_start(self):
+        self.config.write_text(CONFIG.replace('start = "2026-11-10"', "start = 2026-11-10"), encoding="utf-8")
+        done = self.built_page().split(">Done</h2>", 1)[1]
+        self.assertIn("2026-11-11", done)
+
+    def test_names_are_escaped(self):
+        self.scan["packages"][1]["name"] = "<script>alert(1)</script>"
+        page = self.built_page()
+        self.assertNotIn("<script>alert", page)
+        self.assertIn("&lt;script&gt;", page)
+        # Not a name build_pages.py makes a page for, so no link to one.
+        self.assertNotIn('href="../../p/-script-', page)
+
+    def test_description_replaces_the_default_lede(self):
+        self.config.write_text(CONFIG + 'description = "Alpine on Graviton & friends."\n', encoding="utf-8")
+        page = self.built_page()
+        self.assertIn('<p class="lede">Alpine on Graviton &amp; friends.</p>', page)
         self.assertIn('href="../../p/numpy/"', page)
         self.assertIn('href="https://pypi.org/project/psycopg2/"', page)
         self.assertNotIn("Source</th>", page)
@@ -114,10 +179,15 @@ class CampaignTests(unittest.TestCase):
         self.assertNotIn("2026-11-09", done)
         self.assertNotIn("outside-top", done)
         self.assertNotIn("psycopg2", done)
+        # newpy gained the wheel on 11 Nov but no longer has it: not done.
+        self.assertNotIn("newpy", done)
+        self.assertIn("<td>from source</td>", done)
+        self.assertIn("keeps the last 90 days", done)
 
     def test_ask_upstream_and_how_to_link_and_no_javascript(self):
         page = self.built_page()
-        self.assertIn("Ask upstream first", page)
+        self.assertIn("Pick one package, not a list", page)
+        self.assertIn("Never file the same request across many projects at once", page)
         self.assertIn("https://github.com/wheelgap/tracker/blob/main/docs/adding-wheels-upstream.md", page)
         self.assertNotIn("<script", page)
         self.assertIn('href="../../style.css"', page)

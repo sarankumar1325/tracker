@@ -22,7 +22,7 @@ on:
         default: false
   push:
     branches: [main]
-    paths: ["site/**", "scripts/**", ".github/workflows/scan.yml"]
+    paths: ["site/**", "scripts/**", "campaigns.toml", ".github/workflows/scan.yml"]
 
 permissions:
   contents: read
