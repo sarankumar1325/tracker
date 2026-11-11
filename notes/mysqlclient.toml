@@ -1,0 +1,6 @@
+[[note]]
+platforms = ["linux-x86_64", "linux-aarch64"]
+kind = "workaround"
+text = "mysqlclient has Windows wheels only. To build it on Linux, install the Python and MySQL development headers first, as its README lists: `sudo apt-get install python3-dev default-libmysqlclient-dev build-essential pkg-config` on Debian/Ubuntu, or `sudo yum install python3-devel mysql-devel pkgconfig` on Red Hat/CentOS. Then `pip install mysqlclient`."
+links = ["https://github.com/PyMySQL/mysqlclient#linux"]
+updated = 2026-11-11

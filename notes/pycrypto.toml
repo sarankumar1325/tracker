@@ -1,0 +1,6 @@
+[[note]]
+platforms = ["linux-x86_64", "linux-aarch64", "musl-x86_64", "musl-aarch64", "macos-x86_64", "macos-arm64", "win-amd64", "win-arm64"]
+kind = "alternative"
+text = "pycrypto has had no release since 2.6.1 and ships an sdist only. PyCryptodome has wheels here (except for free-threaded Python 3.14, where it builds from source with just a C compiler) and installs under the same `Crypto` package: `pip uninstall pycrypto`, then `pip install pycryptodome`. Its docs warn against having both installed at once."
+links = ["https://www.pycryptodome.org/src/installation", "https://pypi.org/project/pycryptodome/#files"]
+updated = 2026-11-11
