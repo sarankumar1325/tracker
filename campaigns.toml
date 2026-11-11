@@ -1,0 +1,10 @@
+# Campaigns published by scripts/build_campaigns.py when the site is assembled.
+# Each entry becomes a static page at campaigns/<id>/.
+
+[[campaign]]
+id = "musl-aarch64"
+title = "musllinux aarch64 wheels for the top 500"
+platform = "musl-aarch64"
+top = 500
+start = "2026-11-11"
+how_to = "https://github.com/wheelgap/tracker/blob/main/docs/adding-wheels-upstream.md"
