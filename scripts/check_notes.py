@@ -26,7 +26,8 @@ STEM_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 # with a trailing .* only after == or !=. No ~=, ===, epochs, pre/post/dev or local
 # versions, so #28 can match it without the packaging library.
 SPEC_CLAUSE_RE = re.compile(
-    r"\s*(?:(?:==|!=)\s*\d+(?:\.\d+)*(?:\.\*)?|(?:<=|>=|<|>)\s*\d+(?:\.\d+)*)\s*"
+    r"\s*(?:(?:==|!=)\s*\d+(?:\.\d+)*(?:\.\*)?|(?:<=|>=|<|>)\s*\d+(?:\.\d+)*)\s*",
+    re.ASCII,  # \d is Unicode-aware otherwise: "<٣" would pass
 )
 WHITESPACE_RE = re.compile(r"\s")
 
