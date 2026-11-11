@@ -93,7 +93,7 @@ class CampaignTests(unittest.TestCase):
         return (self.site / "campaigns" / "musl-aarch64" / "index.html").read_text(encoding="utf-8")
 
     def todo(self, page: str) -> str:
-        return page.split(">To do</h2>", 1)[1].split("Left out:", 1)[0]
+        return page.split(">To do</h2>", 1)[1].split("Left out:", 1)[0].split(">Done</h2>", 1)[0]
 
     def test_uses_newest_non_free_threaded_python_and_top_n(self):
         page = self.built_page()
@@ -122,14 +122,24 @@ class CampaignTests(unittest.TestCase):
         todo = self.todo(page)
         self.assertNotIn("newpy", todo)
         left_out = page.split("Left out:", 1)[1].split("</p>", 1)[0]
-        self.assertIn("1 package has no Python 3.15 wheel on any platform yet (newpy)", left_out)
+        self.assertIn("1 package has no Python 3.15 wheel for any Linux platform yet (newpy)", left_out)
+
+    def test_only_wheels_for_the_same_os_count_as_started(self):
+        # A Windows wheel doesn't make a Linux-wide gap a musllinux one.
+        self.scan["targets"].append({"label": "3.15 win-amd64", "python": "3.15", "platform": "win-amd64"})
+        for package in self.scan["packages"]:
+            package["results"].append("wheel")
+        page = self.built_page()
+        self.assertNotIn("newpy", self.todo(page))
+        self.assertIn("(newpy)", page.split("Left out:", 1)[1])
 
     def test_campaign_python_overrides_the_newest(self):
         self.config.write_text(CONFIG + 'python = "3.13"\n', encoding="utf-8")
         page = self.built_page()
         self.assertIn("using Python 3.13 (set by the campaign)", page)
-        # On 3.13 musl-aarch64 only requests and newpy have the wheel.
+        # On 3.13 musl-aarch64 only requests and newpy have the wheel, so NumPy (a wheel on 3.15) is to do.
         self.assertIn("(2 of 4)", page)
+        self.assertIn("NumPy", self.todo(page))
 
     def test_bad_campaign_values_are_rejected(self):
         for line in ('python = "3.14t"', "python = 3.14", 'start = "2026-13-45"', "top = true",
@@ -153,7 +163,7 @@ class CampaignTests(unittest.TestCase):
         self.assertNotIn("<script>alert", page)
         self.assertIn("&lt;script&gt;", page)
         # Not a name build_pages.py makes a page for, so no link to one.
-        self.assertNotIn('href="../../p/-script-', page)
+        self.assertNotIn('href="../../p/&lt;', page)
 
     def test_description_replaces_the_default_lede(self):
         self.config.write_text(CONFIG + 'description = "Alpine on Graviton & friends."\n', encoding="utf-8")
@@ -172,7 +182,7 @@ class CampaignTests(unittest.TestCase):
 
     def test_done_is_gains_on_or_after_start_in_the_current_top_n(self):
         page = self.built_page()
-        # 11 Nov gain for NumPy is in; 9 Nov is before start; outside-top is rank 3; linux-x86_64 is wrong target.
+        # 11 Nov gain for NumPy is in; 9 Nov is before start; outside-top is rank 6; linux-x86_64 is wrong target.
         done = page.split(">Done</h2>", 1)[1]
         self.assertIn("NumPy", done)
         self.assertIn("2026-11-11", done)

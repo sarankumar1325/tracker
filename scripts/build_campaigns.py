@@ -136,13 +136,27 @@ def coverage_counts(packages: list[dict], index: int) -> tuple[int, int]:
     return sum(1 for p in checked if has_wheel(p, index)), len(checked)
 
 
-def native_indexes(targets: list[dict], python: str) -> list[int]:
-    """The campaign Python's targets, apart from Pyodide (which has no compiler and few wheels anywhere)."""
-    return [i for i, t in enumerate(targets) if t["python"] == python and t["platform"] != "pyodide"]
+OS_NAMES = {"linux": "Linux", "win": "Windows", "macos": "macOS"}
+
+
+def os_of(platform: str) -> str:
+    """linux for linux-* and musl-* (glibc and musl are both Linux), else the part before the dash."""
+    return "linux" if platform.startswith(("linux-", "musl-")) else platform.split("-", 1)[0]
+
+
+def native_indexes(targets: list[dict], python: str, platform: str) -> list[int]:
+    """The campaign Python's targets on the same OS as the campaign's platform.
+
+    A package with no Linux wheel at all (psycopg2 points people at psycopg2-binary) has an OS-wide gap, not
+    one for a musllinux campaign to ask about.
+    """
+    return [
+        i for i, t in enumerate(targets) if t["python"] == python and os_of(t["platform"]) == os_of(platform)
+    ]
 
 
 def not_started(package: dict, indexes: list[int]) -> bool:
-    """No wheel for this Python on any platform: a new-Python or sdist-only gap, not one for this campaign."""
+    """No wheel for this Python on any platform of the campaign's OS: not a gap for this campaign to ask about."""
     return not package.get("error") and not any(package["results"][i] == "wheel" for i in indexes)
 
 
@@ -311,7 +325,8 @@ def page(campaign: dict, scan: dict, history: list, changes: list, python: str) 
     index = target_index(scan["targets"], python, platform)
     label = scan["targets"][index]["label"]
     packages = top_packages(scan, top)
-    indexes = native_indexes(scan["targets"], python)
+    indexes = native_indexes(scan["targets"], python, platform)
+    os_name = OS_NAMES.get(os_of(platform), os_of(platform))
     wheels, total = coverage_counts(packages, index)
     share = percent(wheels, total)
     compiled = [p for p in packages if not p.get("pure")]
@@ -342,8 +357,9 @@ def page(campaign: dict, scan: dict, history: list, changes: list, python: str) 
         names = ", ".join(e(p["name"]) for p in waiting)
         waiting_html = (
             f'      <p class="note">Left out: {len(waiting)} {"package has" if len(waiting) == 1 else "packages have"} '
-            f"no Python {e(python)} wheel on any platform yet ({names}). That's a new-Python or sdist-only gap "
-            f"for the project as a whole, not one this campaign should ask about.</p>\n"
+            f"no Python {e(python)} wheel for any {e(os_name)} platform yet ({names}). That's a gap for the project "
+            f"as a whole (a new Python, an sdist-only release, or no {e(os_name)} wheels by design), not one this "
+            "campaign should ask about.</p>\n"
         )
     how_to = campaign.get("how_to")
     how_to_html = f' <a href="{e(how_to)}">How to ask for a missing wheel</a>.' if how_to else ""
