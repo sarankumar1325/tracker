@@ -23,5 +23,8 @@ jobs:
       - name: Tests
         # Pinned like the actions above, so a new pytest release can't change or break the check unannounced.
         run: uvx --python 3.14 pytest@8.4.2  # the Python the nightly scan runs the scripts with
+      - name: Check notes
+        # Stdlib only; validates notes/*.toml against data/coverage.json.
+        run: python3 scripts/check_notes.py
       - name: Site syntax
         run: node --check site/app.js
