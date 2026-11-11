@@ -5,8 +5,9 @@
 previous.json is the committed data/coverage.json, copied aside before the scan overwrites it.
 Only changes between `wheel` and something else count; a cell that was or is `unknown` (a lookup
 error) is skipped, so a flaky lookup doesn't show up as a lost and then a regained wheel. Targets
-or packages that are only in one of the two scans are skipped too. Entries older than 90 days
-are dropped, so the file stays small.
+or packages that are only in one of the two scans are skipped too. A night whose scan used a
+different wheelgap version is skipped as a whole: its differences come from wheelgap, not from
+the packages. Entries older than 90 days are dropped, so the file stays small.
 """
 
 from __future__ import annotations
@@ -62,12 +63,17 @@ def merge(earlier: dict, gained: list[dict], lost: list[dict]) -> tuple[list[dic
     return [i for i in kept if i["to"] == "wheel"], [i for i in kept if i["from"] == "wheel"]
 
 
-def update(previous_path: Path, coverage_path: Path, changes_path: Path) -> dict | None:
+def update(previous_path: Path, coverage_path: Path, changes_path: Path) -> dict | str:
+    """Record today's entry and return it, or return why nothing was compared."""
     new = json.loads(coverage_path.read_text(encoding="utf-8"))
     changes = json.loads(changes_path.read_text(encoding="utf-8")) if changes_path.exists() else []
-    entry = None
-    if previous_path.exists():
-        old = json.loads(previous_path.read_text(encoding="utf-8"))
+    old = json.loads(previous_path.read_text(encoding="utf-8")) if previous_path.exists() else None
+    entry: dict | str
+    if old is None:
+        entry = f"no {previous_path}, nothing to compare"
+    elif old.get("wheelgap") != new.get("wheelgap"):
+        entry = f"wheelgap {old.get('wheelgap')} -> {new.get('wheelgap')}, so differences aren't the packages'"
+    else:
         gained, lost = diff(old, new)
         today = new["generated"][:10]
         same_day = [c for c in changes if c["date"] == today]
@@ -84,7 +90,7 @@ def update(previous_path: Path, coverage_path: Path, changes_path: Path) -> dict
 if __name__ == "__main__":
     previous, coverage, changes = (Path(p) for p in sys.argv[1:4])
     entry = update(previous, coverage, changes)
-    if entry is None:
-        print(f"changes: no {previous}, nothing to compare")
+    if isinstance(entry, str):
+        print(f"changes: nothing recorded ({entry})")
     else:
         print(f"changes: {entry['date']}, {len(entry['gained'])} gained, {len(entry['lost'])} lost")
