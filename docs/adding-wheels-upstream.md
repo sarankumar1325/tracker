@@ -12,7 +12,7 @@ Search the project’s issues and discussions for the platform (musllinux, aarch
 - names the platforms that have no wheel;
 - offers to do the work.
 
-Respect a “not now”. Never file the same issue across many projects at once; a burst of drive-by tickets is worse than a missing wheel.
+Respect a “not now”. Never file the same issue across many projects at once; a burst of drive-by tickets is worse than a missing wheel. Wait for a go-ahead before opening a PR.
 
 ## 2. The usual fix: cibuildwheel
 
@@ -20,8 +20,8 @@ Most projects already ship wheels with [cibuildwheel](https://cibuildwheel.pypa.
 
 - **musllinux** (Alpine and other musl systems). cibuildwheel builds these by default on Linux; see [Linux builds](https://cibuildwheel.pypa.io/en/stable/platforms/#linux). If they are missing, the project usually skips them: [pygit2#1266](https://github.com/libgit2/pygit2/pull/1266) is a compact example that removed its `*musl*` skip and published the wheels.
 - **Linux aarch64.** GitHub’s [arm64 hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories) (`ubuntu-24.04-arm`) build natively. QEMU still works, and is much slower: [psutil#2425](https://github.com/giampaolo/psutil/pull/2425) added manylinux aarch64 wheels with QEMU, while [PyYAML#864](https://github.com/yaml/pyyaml/pull/864) moved its aarch64 jobs to native `ubuntu-24.04-arm`.
-- **Windows on ARM.** cibuildwheel documents [Windows ARM64 builds](https://cibuildwheel.pypa.io/en/stable/platforms/#windows-arm64). It can cross-compile them on any Windows runner, but tests need a native `windows-11-arm` runner; cross-compiled ARM64 wheels go out untested. [PyYAML#864](https://github.com/yaml/pyyaml/pull/864) is an example of adding `win_arm64` to an existing matrix on `windows-11-arm`.
-- **Free-threaded builds** (`cp314t`, `cp315t`): cibuildwheel builds them by default (`cp314t` since 3.1, 3.15 since 4.2), so a missing one usually means the project skips `cp31?t-*` or pins an older cibuildwheel. Removing that skip declares free-threading support, so leave that decision to the maintainers.
+- **Windows on ARM.** cibuildwheel documents [Windows ARM64 builds](https://cibuildwheel.pypa.io/en/stable/platforms/#windows-arm64). It can cross-compile them on any Windows runner (select it with [`archs`](https://cibuildwheel.pypa.io/en/stable/options/#archs); only setuptools and setuptools-rust builds cross-compile), but tests need a native `windows-11-arm` runner; cross-compiled ARM64 wheels go out untested. [PyYAML#864](https://github.com/yaml/pyyaml/pull/864) is an example of adding `win_arm64` to an existing matrix on `windows-11-arm`.
+- **Free-threaded builds** (`cp314t`, `cp315t`): cibuildwheel builds them by default (`cp314t` since 3.1, `cp315t` since 4.2), so a missing one usually means the project skips `cp31?t-*` or pins an older cibuildwheel. Removing that skip declares free-threading support, so leave that decision to the maintainers.
 - **Testing the wheel** in CI with [`test-command`](https://cibuildwheel.pypa.io/en/stable/options/#test-command) (`CIBW_TEST_COMMAND`), so a broken wheel does not get uploaded.
 
 Keep the change to the workflow and the project’s existing test suite. Don’t add a new backend or rewrite the package’s build unless the maintainers ask for that.
@@ -56,4 +56,4 @@ uvx wheelgap <name>==<new version> -t all --all
 
 That should show a ✓ on the platforms you added (without `--all`, a package with no gaps prints a single summary line). Add `-p 3.14t` to check free-threaded wheels. This tracker’s nightly scan will pick the new version up the next night; the package page and the most-wanted lists update when that scan is published.
 
-If `wheelgap` still reports `source` or `missing` for a platform you think you built, rerun with `--explain` to see each wheel wheelgap rejected and why, check the built wheel with `auditwheel show`, and compare against wheelgap’s glibc, musl and macOS baselines, which are listed in [the tracker caveats](https://github.com/wheelgap/tracker#caveats).
+If `wheelgap` still reports `source` or `missing` for a platform you think you built, rerun with `--explain` to see each wheel wheelgap rejected and why, check the built wheel with `auditwheel show` (Linux only; `delocate-listdeps` on macOS), and compare against wheelgap’s glibc, musl and macOS baselines, which are listed in [the tracker caveats](https://github.com/wheelgap/tracker#caveats).
