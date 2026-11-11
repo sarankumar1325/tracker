@@ -68,6 +68,8 @@ jobs:
       - name: Update history
         run: python3 scripts/update_history.py data/coverage.json data/history.json
       - name: Record the wheels gained and lost
+        # Extra data: if it fails, still commit the night's scan (the script writes changes.json last).
+        continue-on-error: true
         run: python3 scripts/update_changes.py previous.json data/coverage.json data/changes.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
