@@ -97,8 +97,9 @@ class CheckNotesTests(unittest.TestCase):
         self.write("psycopg2.toml", note_toml(platforms='["all", "musl-aarch64"]'))
         found = self.problems()
         self.assertTrue(
-            any("unknown platform" in p or "all" in p for p in found), found
+            any('"all" cannot be combined with others' in p for p in found), found
         )
+        self.assertFalse(any("unknown platform" in p for p in found), found)
 
     def test_empty_text_is_reported(self):
         self.write("psycopg2.toml", note_toml(text="   "))
@@ -145,14 +146,33 @@ class CheckNotesTests(unittest.TestCase):
         self.assertTrue(any("unknown top-level keys: title" in p for p in found), found)
 
     def test_bad_versions_specifier_is_reported(self):
-        for bad in ("3.x or later", "<3,", "=>3", "3", "< 3 or > 4", " "):
+        bad_specifiers = (
+            "3.x or later",
+            "<3,",
+            "=>3",
+            "3",
+            "< 3 or > 4",
+            " ",
+            "~=2.9",
+            "===2.9.13",
+            "<3.*",
+            ">=2.*",
+            "==1!2.0",
+            "==2.9+local",
+            "<3.0rc1",
+            ">=2.9.post1",
+            "==2.9.dev0",
+            "==v2",
+            "==2.",
+        )
+        for bad in bad_specifiers:
             with self.subTest(versions=bad):
                 self.write("psycopg2.toml", note_toml(versions=bad))
                 found = self.problems()
                 self.assertTrue(any("versions" in p for p in found), found)
 
     def test_multi_clause_versions_specifier_is_accepted(self):
-        for good in (">=2.8, <2.10", "~=2.9", "!=2.9.1", "==2.*", "===2.9.13"):
+        for good in (">=2.8, <2.10", "!=2.9.1", "==2.*", "!=2.9.*", "<=3", ">1,<2"):
             with self.subTest(versions=good):
                 self.write("psycopg2.toml", note_toml(versions=good))
                 self.assertEqual(self.problems(), [])
@@ -207,6 +227,86 @@ class CheckNotesTests(unittest.TestCase):
         self.write("psycopg2.toml", note_toml(text="x" * 500))
         found = self.problems()
         self.assertTrue(any("under 500" in p for p in found), found)
+
+    def test_multi_line_text_is_reported(self):
+        self.write("psycopg2.toml", note_toml(text="First line.\\nSecond line."))
+        found = self.problems()
+        self.assertTrue(any("single line" in p for p in found), found)
+
+    def test_empty_platforms_are_reported(self):
+        self.write("psycopg2.toml", note_toml(platforms="[]"))
+        found = self.problems()
+        self.assertTrue(any("platforms must be a non-empty list" in p for p in found))
+
+    def test_empty_links_are_reported(self):
+        self.write("psycopg2.toml", note_toml(links="[]"))
+        found = self.problems()
+        self.assertTrue(any("links must be a non-empty list" in p for p in found))
+
+    def test_missing_required_keys_are_reported(self):
+        self.write("psycopg2.toml", '[[note]]\nkind = "alternative"\n')
+        found = self.problems()
+        self.assertTrue(
+            any(
+                "missing required keys: platforms, text, links, updated" in p
+                for p in found
+            ),
+            found,
+        )
+
+    def test_duplicate_platforms_are_reported(self):
+        self.write(
+            "psycopg2.toml", note_toml(platforms='["musl-aarch64", "musl-aarch64"]')
+        )
+        found = self.problems()
+        self.assertTrue(any("duplicate platforms" in p for p in found), found)
+
+    def test_duplicate_links_are_reported(self):
+        self.write(
+            "psycopg2.toml",
+            note_toml(links='["https://example.com/a", "https://example.com/a"]'),
+        )
+        found = self.problems()
+        self.assertTrue(any("duplicate links" in p for p in found), found)
+
+    def test_links_without_a_host_or_with_spaces_are_rejected(self):
+        for bad in (
+            "https://",
+            "https:///path",
+            "https://exa mple.com/",
+            "https://example.com/a b",
+            "https://example.com/\\t",
+            "ftp://example.com/",
+            "https://[::1/",
+        ):
+            with self.subTest(link=bad):
+                self.write("psycopg2.toml", note_toml(links=f'["{bad}"]'))
+                found = self.problems()
+                self.assertTrue(any("links must be https" in p for p in found), found)
+
+    def test_future_updated_date_is_reported(self):
+        self.write("psycopg2.toml", note_toml(updated="2999-01-01"))
+        found = self.problems()
+        self.assertTrue(any("in the future" in p for p in found), found)
+
+    def test_today_is_not_in_the_future(self):
+        self.write("psycopg2.toml", note_toml(updated=dt.date.today().isoformat()))
+        self.assertEqual(self.problems(), [])
+
+    def test_non_toml_file_is_reported(self):
+        self.write("psycopg2.txt", note_toml())
+        found = self.problems()
+        self.assertEqual(found, ["psycopg2.txt: not a .toml file"])
+
+    def test_subdirectory_is_reported(self):
+        (self.notes / "extra").mkdir()
+        found = self.problems()
+        self.assertTrue(found and found[0].startswith("extra: not a file"), found)
+
+    def test_filename_error_suggests_the_normalized_name(self):
+        self.write("Py_Crypto.toml", note_toml())
+        found = self.problems()
+        self.assertTrue(any("expected 'py-crypto'" in p for p in found), found)
 
     def test_real_notes_pass_against_coverage(self):
         repo = Path(__file__).resolve().parent.parent

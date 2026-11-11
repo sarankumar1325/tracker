@@ -14,14 +14,21 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 KINDS = ("workaround", "alternative", "upstream-issue", "other-source")
 MAX_TEXT = 500  # text must be shorter than this
-NOTE_KEYS = frozenset({"platforms", "kind", "text", "links", "versions", "updated"})
+REQUIRED_KEYS = ("platforms", "kind", "text", "links", "updated")
+NOTE_KEYS = frozenset(REQUIRED_KEYS) | {"versions"}
 NAME_RE = re.compile(r"[-_.]+")
 STEM_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
-# One PEP 440 specifier clause; versions is one or more of these, comma-separated.
-SPEC_CLAUSE_RE = re.compile(r"\s*(~=|===|==|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!_-]+\s*")
+# One clause of the v0 versions subset of PEP 440: plain N(.N)* release numbers,
+# with a trailing .* only after == or !=. No ~=, ===, epochs, pre/post/dev or local
+# versions, so #28 can match it without the packaging library.
+SPEC_CLAUSE_RE = re.compile(
+    r"\s*(?:(?:==|!=)\s*\d+(?:\.\d+)*(?:\.\*)?|(?:<=|>=|<|>)\s*\d+(?:\.\d+)*)\s*"
+)
+WHITESPACE_RE = re.compile(r"\s")
 
 
 def normalize_name(name: str) -> str:
@@ -30,7 +37,7 @@ def normalize_name(name: str) -> str:
 
 
 def valid_specifier(value: object) -> bool:
-    """A comma-separated list of PEP 440 clauses, like "<3" or ">=2.8, <2.10"."""
+    """Comma-separated clauses like "<3" or ">=2.8, <2.10" (see SPEC_CLAUSE_RE)."""
     if not isinstance(value, str) or not value.strip():
         return False
     return all(SPEC_CLAUSE_RE.fullmatch(clause) for clause in value.split(","))
@@ -50,10 +57,12 @@ def problems(notes_dir: Path, coverage: dict) -> list[str]:
         return ["coverage has no target platforms"]
 
     out: list[str] = []
-    paths = sorted(
-        p for p in notes_dir.iterdir() if p.is_file() and p.name != "README.md"
-    )
-    for path in paths:
+    for path in sorted(notes_dir.iterdir()):
+        if path.name == "README.md":
+            continue
+        if not path.is_file():
+            out.append(f"{path.name}: not a file (only notes/<name>.toml belong here)")
+            continue
         out.extend(_file_problems(path, notes_dir, allowed))
     return out
 
@@ -68,7 +77,9 @@ def _file_problems(path: Path, notes_dir: Path, allowed: set[str]) -> list[str]:
         return [f"{rel}: not a .toml file"]
     stem = path.stem
     if not STEM_RE.fullmatch(stem):
-        return [f"{rel}: filename must be the normalized package name (got {stem!r})"]
+        expected = normalize_name(stem)
+        message = f"filename must be the normalized package name (got {stem!r}, expected {expected!r})"
+        return [f"{rel}: {message}"]
 
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -96,56 +107,92 @@ def _file_problems(path: Path, notes_dir: Path, allowed: set[str]) -> list[str]:
     return out
 
 
+def valid_link(link: object) -> bool:
+    """An https:// URL with a host and no whitespace."""
+    if not isinstance(link, str) or WHITESPACE_RE.search(link):
+        return False
+    try:
+        parts = urlsplit(link)
+        return parts.scheme == "https" and bool(parts.hostname)
+    except ValueError:  # e.g. a malformed IPv6 host or port
+        return False
+
+
+def _duplicates(items: list) -> list:
+    seen: list = []
+    dupes: list = []
+    for item in items:
+        if item in seen and item not in dupes:
+            dupes.append(item)
+        seen.append(item)
+    return dupes
+
+
 def _note_problems(prefix: str, note: dict, allowed: set[str]) -> list[str]:
     out: list[str] = []
     unknown = sorted(set(note) - NOTE_KEYS)
     if unknown:
         out.append(f"{prefix}: unknown keys: {', '.join(unknown)}")
+    missing = [key for key in REQUIRED_KEYS if key not in note]
+    if missing:
+        out.append(f"{prefix}: missing required keys: {', '.join(missing)}")
 
-    platforms = note.get("platforms")
-    if not isinstance(platforms, list) or not platforms:
-        out.append(f"{prefix}: platforms must be a non-empty list")
-    else:
-        if platforms == ["all"]:
-            pass
-        else:
-            for p in platforms:
-                if not isinstance(p, str) or p == "all" or p not in allowed:
-                    out.append(f"{prefix}: unknown platform {p!r}")
-                    break
+    if "platforms" in note:
+        platforms = note["platforms"]
+        if not isinstance(platforms, list) or not platforms:
+            out.append(f"{prefix}: platforms must be a non-empty list")
+        elif "all" in platforms and len(platforms) > 1:
+            out.append(f'{prefix}: platforms "all" cannot be combined with others')
+        elif platforms != ["all"]:
+            bad = [p for p in platforms if not isinstance(p, str) or p not in allowed]
+            if bad:
+                out.append(f"{prefix}: unknown platform {bad[0]!r}")
+            elif dupes := _duplicates(platforms):
+                out.append(f"{prefix}: duplicate platforms: {', '.join(dupes)}")
 
-    kind = note.get("kind")
-    if kind not in KINDS:
+    if "kind" in note and note["kind"] not in KINDS:
         out.append(f"{prefix}: kind must be one of {', '.join(KINDS)}")
 
-    text = note.get("text")
-    if not isinstance(text, str) or not text.strip():
-        out.append(f"{prefix}: text must be a non-empty string")
-    elif len(text) >= MAX_TEXT:
-        out.append(
-            f"{prefix}: text is {len(text)} characters, must be under {MAX_TEXT}"
-        )
+    if "text" in note:
+        text = note["text"]
+        if not isinstance(text, str) or not text.strip():
+            out.append(f"{prefix}: text must be a non-empty string")
+        elif "\n" in text or "\r" in text:
+            out.append(f"{prefix}: text must be a single line")
+        elif len(text) >= MAX_TEXT:
+            out.append(
+                f"{prefix}: text is {len(text)} characters, must be under {MAX_TEXT}"
+            )
 
-    links = note.get("links")
-    if not isinstance(links, list) or not links:
-        out.append(f"{prefix}: links must be a non-empty list")
-    else:
-        for link in links:
-            if not isinstance(link, str) or not link.startswith("https://"):
-                out.append(f"{prefix}: links must be https URLs (got {link!r})")
-                break
+    if "links" in note:
+        links = note["links"]
+        if not isinstance(links, list) or not links:
+            out.append(f"{prefix}: links must be a non-empty list")
+        elif bad := [link for link in links if not valid_link(link)]:
+            out.append(
+                f"{prefix}: links must be https URLs with a host and no spaces "
+                f"(got {bad[0]!r})"
+            )
+        elif dupes := _duplicates(links):
+            out.append(f"{prefix}: duplicate links: {', '.join(dupes)}")
 
     if "versions" in note and not valid_specifier(note["versions"]):
         out.append(
-            f'{prefix}: versions must be a PEP 440 specifier such as "<3" '
-            f"(got {note['versions']!r})"
+            f'{prefix}: versions must be clauses like "<3" or ">=2.8, <2.10" '
+            f"(==, !=, <=, >=, <, > and N.N versions only; got {note['versions']!r})"
         )
 
-    # A TOML datetime is a dt.datetime, which subclasses dt.date: require a bare date.
-    if type(note.get("updated")) is not dt.date:
-        out.append(
-            f"{prefix}: updated must be a date like 2026-11-11, not a string or datetime"
-        )
+    if "updated" in note:
+        updated = note["updated"]
+        # A TOML datetime is a dt.datetime, which subclasses dt.date: require a date.
+        if type(updated) is not dt.date:
+            out.append(
+                f"{prefix}: updated must be a date like 2026-11-11, "
+                "not a string or datetime"
+            )
+        # One day of slack, so a note dated in a timezone ahead of UTC still passes.
+        elif updated > dt.datetime.now(dt.UTC).date() + dt.timedelta(days=1):
+            out.append(f"{prefix}: updated {updated} is in the future")
 
     return out
 
