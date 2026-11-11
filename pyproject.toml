@@ -1,0 +1,5 @@
+# Only test settings: the tracker isn't a package. Run the tests with `uvx pytest` or
+# `python -m unittest discover -s tests`.
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
