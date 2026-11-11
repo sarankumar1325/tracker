@@ -91,6 +91,7 @@ def page(package: dict, scan: dict, python: str) -> str:
     name, version = package["name"], package["version"] or ""
     title = f"{name} wheel coverage: Linux, Alpine, macOS, Windows, ARM, Pyodide"
     url = f"{BASE_URL}p/{canonical(name)}/"
+    summary = describe(package, columns, python)
 
     def cell(py: str, pl: str) -> str:
         i = index.get((py, pl))
@@ -118,7 +119,7 @@ def page(package: dict, scan: dict, python: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="{CSP}">
   <title>{e(title)}</title>
-  <meta name="description" content="{e(describe(package, columns, python))}">
+  <meta name="description" content="{e(summary)}">
   <link rel="canonical" href="{e(url)}">
   <link rel="stylesheet" href="../../style.css">
   <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
@@ -127,6 +128,7 @@ def page(package: dict, scan: dict, python: str) -> str:
   <header class="wrap">
     <p class="eyebrow"><a href="../../">wheelgap tracker</a></p>
     <h1>{e(name)} wheel coverage</h1>
+    <p>{e(summary)}</p>
     <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(str(scan["generated"])[:10])}.</p>
   </header>
   <main class="wrap">
