@@ -1,6 +1,6 @@
 [[note]]
-platforms = ["all"]
+platforms = ["linux-x86_64", "linux-aarch64", "musl-x86_64", "musl-aarch64", "macos-x86_64", "macos-arm64", "win-amd64", "win-arm64"]
 kind = "alternative"
-text = "pycrypto is unmaintained (last release 2013) and has no wheels. PyCryptodome is the drop-in fork: `pip install pycryptodome` (or `pycryptodomex` if you need it alongside the old package)."
-links = ["https://www.pycryptodome.org/src/introduction"]
+text = "pycrypto has had no release since 2.6.1 and ships an sdist only. PyCryptodome has wheels here and installs under the same `Crypto` package: `pip uninstall pycrypto`, then `pip install pycryptodome`. Its docs warn against having both installed at once."
+links = ["https://www.pycryptodome.org/src/installation", "https://pypi.org/project/pycryptodome/#files"]
 updated = 2026-11-11

@@ -16,13 +16,24 @@ import tomllib
 from pathlib import Path
 
 KINDS = ("workaround", "alternative", "upstream-issue", "other-source")
-MAX_TEXT = 500
+MAX_TEXT = 500  # text must be shorter than this
+NOTE_KEYS = frozenset({"platforms", "kind", "text", "links", "versions", "updated"})
 NAME_RE = re.compile(r"[-_.]+")
+STEM_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+# One PEP 440 specifier clause; versions is one or more of these, comma-separated.
+SPEC_CLAUSE_RE = re.compile(r"\s*(~=|===|==|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!_-]+\s*")
 
 
 def normalize_name(name: str) -> str:
     """PEP 503 normalization: lowercase, runs of -, _ and . become one -."""
     return NAME_RE.sub("-", name).lower()
+
+
+def valid_specifier(value: object) -> bool:
+    """A comma-separated list of PEP 440 clauses, like "<3" or ">=2.8, <2.10"."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return all(SPEC_CLAUSE_RE.fullmatch(clause) for clause in value.split(","))
 
 
 def platform_names(coverage: dict) -> set[str]:
@@ -48,23 +59,34 @@ def problems(notes_dir: Path, coverage: dict) -> list[str]:
 
 
 def _file_problems(path: Path, notes_dir: Path, allowed: set[str]) -> list[str]:
-    rel = path.relative_to(notes_dir).as_posix() if path.is_relative_to(notes_dir) else path.name
+    rel = (
+        path.relative_to(notes_dir).as_posix()
+        if path.is_relative_to(notes_dir)
+        else path.name
+    )
     if path.suffix != ".toml":
         return [f"{rel}: not a .toml file"]
     stem = path.stem
-    if normalize_name(stem) != stem or not stem:
+    if not STEM_RE.fullmatch(stem):
         return [f"{rel}: filename must be the normalized package name (got {stem!r})"]
 
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        return [f"{rel}: not valid UTF-8"]
     except (OSError, tomllib.TOMLDecodeError) as e:
         return [f"{rel}: {e}"]
 
+    out: list[str] = []
+    unknown = sorted(set(data) - {"note"})
+    if unknown:
+        out.append(f"{rel}: unknown top-level keys: {', '.join(unknown)}")
+
     notes = data.get("note")
     if not isinstance(notes, list) or not notes:
-        return [f"{rel}: needs at least one [[note]]"]
+        out.append(f"{rel}: needs at least one [[note]]")
+        return out
 
-    out: list[str] = []
     for i, note in enumerate(notes, start=1):
         prefix = f"{rel} note {i}"
         if not isinstance(note, dict):
@@ -76,6 +98,10 @@ def _file_problems(path: Path, notes_dir: Path, allowed: set[str]) -> list[str]:
 
 def _note_problems(prefix: str, note: dict, allowed: set[str]) -> list[str]:
     out: list[str] = []
+    unknown = sorted(set(note) - NOTE_KEYS)
+    if unknown:
+        out.append(f"{prefix}: unknown keys: {', '.join(unknown)}")
+
     platforms = note.get("platforms")
     if not isinstance(platforms, list) or not platforms:
         out.append(f"{prefix}: platforms must be a non-empty list")
@@ -95,8 +121,10 @@ def _note_problems(prefix: str, note: dict, allowed: set[str]) -> list[str]:
     text = note.get("text")
     if not isinstance(text, str) or not text.strip():
         out.append(f"{prefix}: text must be a non-empty string")
-    elif len(text) > MAX_TEXT:
-        out.append(f"{prefix}: text is {len(text)} characters, limit is {MAX_TEXT}")
+    elif len(text) >= MAX_TEXT:
+        out.append(
+            f"{prefix}: text is {len(text)} characters, must be under {MAX_TEXT}"
+        )
 
     links = note.get("links")
     if not isinstance(links, list) or not links:
@@ -107,14 +135,17 @@ def _note_problems(prefix: str, note: dict, allowed: set[str]) -> list[str]:
                 out.append(f"{prefix}: links must be https URLs (got {link!r})")
                 break
 
-    if "versions" in note and (
-        not isinstance(note["versions"], str) or not note["versions"].strip()
-    ):
-        out.append(f"{prefix}: versions must be a non-empty string when set")
+    if "versions" in note and not valid_specifier(note["versions"]):
+        out.append(
+            f'{prefix}: versions must be a PEP 440 specifier such as "<3" '
+            f"(got {note['versions']!r})"
+        )
 
-    updated = note.get("updated")
-    if not isinstance(updated, dt.date):
-        out.append(f"{prefix}: updated must be a date")
+    # A TOML datetime is a dt.datetime, which subclasses dt.date: require a bare date.
+    if type(note.get("updated")) is not dt.date:
+        out.append(
+            f"{prefix}: updated must be a date like 2026-11-11, not a string or datetime"
+        )
 
     return out
 

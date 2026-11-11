@@ -52,7 +52,9 @@ class CheckNotesTests(unittest.TestCase):
         return path
 
     def problems(self, scan=None):
-        return check_notes.problems(self.notes, scan if scan is not None else coverage())
+        return check_notes.problems(
+            self.notes, scan if scan is not None else coverage()
+        )
 
     def test_valid_note_is_clean(self):
         self.write("psycopg2.toml", note_toml())
@@ -77,7 +79,7 @@ class CheckNotesTests(unittest.TestCase):
         self.assertTrue(found and "broken.toml" in found[0], found)
 
     def test_missing_note_table_is_reported(self):
-        self.write("empty.toml", "kind = \"alternative\"\n")
+        self.write("empty.toml", 'kind = "alternative"\n')
         found = self.problems()
         self.assertTrue(any("at least one" in p for p in found), found)
 
@@ -94,7 +96,9 @@ class CheckNotesTests(unittest.TestCase):
     def test_all_mixed_with_a_name_is_reported(self):
         self.write("psycopg2.toml", note_toml(platforms='["all", "musl-aarch64"]'))
         found = self.problems()
-        self.assertTrue(any("unknown platform" in p or "all" in p for p in found), found)
+        self.assertTrue(
+            any("unknown platform" in p or "all" in p for p in found), found
+        )
 
     def test_empty_text_is_reported(self):
         self.write("psycopg2.toml", note_toml(text="   "))
@@ -125,6 +129,85 @@ class CheckNotesTests(unittest.TestCase):
         self.write("psycopg2.toml", note_toml(versions="<3"))
         self.assertEqual(self.problems(), [])
 
+    def test_filename_with_a_doubled_separator_is_reported(self):
+        self.write("py--crypto.toml", note_toml())
+        found = self.problems()
+        self.assertTrue(any("normalized" in p for p in found), found)
+
+    def test_unknown_note_key_is_reported(self):
+        self.write("psycopg2.toml", note_toml() + 'colour = "red"\n')
+        found = self.problems()
+        self.assertTrue(any("unknown keys: colour" in p for p in found), found)
+
+    def test_unknown_top_level_key_is_reported(self):
+        self.write("psycopg2.toml", 'title = "psycopg2"\n' + note_toml())
+        found = self.problems()
+        self.assertTrue(any("unknown top-level keys: title" in p for p in found), found)
+
+    def test_bad_versions_specifier_is_reported(self):
+        for bad in ("3.x or later", "<3,", "=>3", "3", "< 3 or > 4", " "):
+            with self.subTest(versions=bad):
+                self.write("psycopg2.toml", note_toml(versions=bad))
+                found = self.problems()
+                self.assertTrue(any("versions" in p for p in found), found)
+
+    def test_multi_clause_versions_specifier_is_accepted(self):
+        for good in (">=2.8, <2.10", "~=2.9", "!=2.9.1", "==2.*", "===2.9.13"):
+            with self.subTest(versions=good):
+                self.write("psycopg2.toml", note_toml(versions=good))
+                self.assertEqual(self.problems(), [])
+
+    def test_offset_datetime_is_not_a_date(self):
+        self.write("psycopg2.toml", note_toml(updated="2026-11-11T09:30:00+01:00"))
+        found = self.problems()
+        self.assertTrue(any("updated must be a date" in p for p in found), found)
+
+    def test_local_datetime_is_not_a_date(self):
+        self.write("psycopg2.toml", note_toml(updated="2026-11-11T09:30:00"))
+        found = self.problems()
+        self.assertTrue(any("updated must be a date" in p for p in found), found)
+
+    def test_non_utf8_file_is_reported(self):
+        (self.notes / "psycopg2.toml").write_bytes(
+            note_toml().encode("utf-8") + b"# caf\xe9\n"
+        )
+        found = self.problems()
+        self.assertEqual(found, ["psycopg2.toml: not valid UTF-8"])
+
+    def test_empty_file_is_reported(self):
+        self.write("psycopg2.toml", "")
+        found = self.problems()
+        self.assertTrue(any("at least one" in p for p in found), found)
+
+    def test_wrong_types_are_reported(self):
+        self.write(
+            "psycopg2.toml",
+            "[[note]]\n"
+            'platforms = "musl-aarch64"\n'
+            "kind = 3\n"
+            "text = 5\n"
+            'links = "https://example.com/docs"\n'
+            "versions = 3\n"
+            "updated = 20261111\n",
+        )
+        found = self.problems()
+        for field in ("platforms", "kind", "text", "links", "versions", "updated"):
+            self.assertTrue(any(f": {field} " in p for p in found), (field, found))
+
+    def test_note_that_is_not_a_table_is_reported(self):
+        self.write("psycopg2.toml", "note = [1]\n")
+        found = self.problems()
+        self.assertTrue(any("expected a table" in p for p in found), found)
+
+    def test_text_of_499_characters_is_accepted(self):
+        self.write("psycopg2.toml", note_toml(text="x" * 499))
+        self.assertEqual(self.problems(), [])
+
+    def test_text_of_500_characters_is_reported(self):
+        self.write("psycopg2.toml", note_toml(text="x" * 500))
+        found = self.problems()
+        self.assertTrue(any("under 500" in p for p in found), found)
+
     def test_real_notes_pass_against_coverage(self):
         repo = Path(__file__).resolve().parent.parent
         scan = json.loads((repo / "data" / "coverage.json").read_text(encoding="utf-8"))
@@ -133,7 +216,9 @@ class CheckNotesTests(unittest.TestCase):
     def test_cli_exits_zero_on_the_repo_notes(self):
         repo = Path(__file__).resolve().parent.parent
         self.assertEqual(
-            check_notes.main([str(repo / "notes"), str(repo / "data" / "coverage.json")]),
+            check_notes.main(
+                [str(repo / "notes"), str(repo / "data" / "coverage.json")]
+            ),
             0,
         )
 
