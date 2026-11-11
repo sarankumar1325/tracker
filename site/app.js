@@ -193,6 +193,7 @@ function renderLookup(query) {
   $("lookup").innerHTML = `<div class="card">
     <h3>${esc(p.name)} <span class="ver">${esc(p.version ?? "")}</span></h3>
     <p class="sub">#${esc(p.rank)} by downloads${p.pure ? " · pure Python: installs everywhere" : ""}${p.error ? ` · lookup failed: ${esc(p.error)}` : ""} ·
+      <a href="p/${esc(canonicalName(p.name))}/">Package page</a> ·
       <a href="https://pypi.org/project/${encodeURIComponent(p.name)}/">PyPI</a></p>
     <div class="matrix-scroll"><table class="matrix">
       <thead><tr><th>Platform</th>${pys.map((py) => `<th>${esc(py)}</th>`).join("")}</tr></thead>

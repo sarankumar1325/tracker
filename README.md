@@ -42,6 +42,10 @@ Each package has a [shields.io endpoint](https://shields.io/badges/endpoint-badg
 
 Use the normalized name, as for the API; the package lookup on the site shows the snippet with a Copy button. Badges are built when the site is published, by [`scripts/build_badges.py`](scripts/build_badges.py), and only exist for packages in the top 5,000.
 
+## Package pages
+
+Each package also has a plain HTML page, e.g. [`p/numpy/`](https://wheelgap.github.io/tracker/p/numpy/), with the same status table as the lookup, a one-line summary of its gaps for the newest non-free-threaded Python, and the `wheelgap --explain` command. The lookup links to it, and [`sitemap.xml`](https://wheelgap.github.io/tracker/sitemap.xml) lists them all. They're built when the site is published, by [`scripts/build_pages.py`](scripts/build_pages.py).
+
 ## Caveats
 
 - Only the **latest release** of each package is checked. Your pinned version may differ, so for that, run `uvx wheelgap` on your lockfile.
