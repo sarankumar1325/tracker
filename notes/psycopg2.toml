@@ -1,0 +1,6 @@
+[[note]]
+platforms = ["all"]
+kind = "alternative"
+text = "psycopg2 ships an sdist only. The official stand-alone build is the psycopg2-binary package: `pip install psycopg2-binary`. For psycopg 3, use `pip install 'psycopg[binary]'`."
+links = ["https://www.psycopg.org/docs/install.html"]
+updated = 2026-11-11

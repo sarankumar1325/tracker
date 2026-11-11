@@ -1,0 +1,6 @@
+[[note]]
+platforms = ["all"]
+kind = "workaround"
+text = "mysqlclient is a wrapper around the MySQL client library. Install the libmysqlclient headers first (for example `pkg-config` and `default-libmysqlclient-dev` on Debian, `mysql-devel` on Fedora) before building from the sdist."
+links = ["https://github.com/PyMySQL/mysqlclient#install"]
+updated = 2026-11-11

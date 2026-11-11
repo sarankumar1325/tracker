@@ -1,0 +1,6 @@
+[[note]]
+platforms = ["all"]
+kind = "alternative"
+text = "pycrypto is unmaintained (last release 2013) and has no wheels. PyCryptodome is the drop-in fork: `pip install pycryptodome` (or `pycryptodomex` if you need it alongside the old package)."
+links = ["https://www.pycryptodome.org/src/introduction"]
+updated = 2026-11-11
