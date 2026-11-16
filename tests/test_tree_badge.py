@@ -32,7 +32,7 @@ class TreeBadgeTests(unittest.TestCase):
     def test_counts_platforms_where_the_whole_tree_has_wheels(self):
         badge = self.badge(statuses("wheel", "wheel", "source", "missing"))
         self.assertEqual(badge["label"], "wheels+deps py3.14")
-        self.assertEqual((badge["message"], badge["color"]), ("2/4 platforms", "yellow"))
+        self.assertEqual((badge["message"], badge["color"]), ("2/4 checked", "yellow"))
         self.assertEqual(badge["schemaVersion"], 1)
         self.assertEqual(badge["cacheSeconds"], build_badges.CACHE_SECONDS)
 
@@ -53,16 +53,33 @@ class TreeBadgeTests(unittest.TestCase):
     def test_pyodide_and_free_threaded_targets_dont_count(self):
         ts = targets(("3.14", "3.14t"), NATIVE + ["pyodide"])
         install = {**statuses(*["wheel"] * 4), **statuses(*["source"] * 4, python="3.14t"), "3.14 pyodide": "source"}
-        self.assertEqual(self.badge(install, ts)["message"], "4/4 platforms")
+        self.assertEqual(self.badge(install, ts)["message"], "4/4 checked")
 
     def test_uses_the_newest_python_with_install_data(self):
         ts = targets(("3.14", "3.15"))
         badge = self.badge(statuses("wheel", "source", "wheel", "wheel"), ts)  # only 3.14 was install-checked
-        self.assertEqual((badge["label"], badge["message"]), ("wheels+deps py3.14", "3/4 platforms"))
+        self.assertEqual((badge["label"], badge["message"]), ("wheels+deps py3.14", "3/4 checked"))
 
-    def test_one_platform_is_singular(self):
+    def test_a_newer_python_with_only_not_checked_install_results_is_skipped(self):
+        # The scan has 3.15 targets and `install` has 3.15 labels, all not_checked: the badge is for 3.14, as
+        # build_pages' summary is, not a grey "partly checked" for 3.15.
+        six = NATIVE + ["win-arm64", "musl-aarch64"]  # the install scan's native platforms on 3.14
+        ts = targets(("3.14", "3.15"), six)
+        install = {
+            **statuses("wheel", "wheel", "wheel", "wheel", "wheel", "source", platforms=six),
+            **statuses(*["not_checked"] * 6, python="3.15", platforms=six),
+        }
+        badge = self.badge(install, ts)
+        self.assertEqual((badge["label"], badge["message"]), ("wheels+deps py3.14", "5/6 checked"))
+        self.assertEqual(badge["color"], "green")
+        self.assertIn("on Python 3.14:", build_pages.describe_install(package("demo", install), ts))
+
+    def test_only_not_checked_results_no_badge(self):
+        self.assertIsNone(self.badge(statuses(*["not_checked"] * 4)))
+
+    def test_one_platform(self):
         badge = self.badge({"3.14 linux-x86_64": "wheel"})
-        self.assertEqual(badge["message"], "1/1 platform")
+        self.assertEqual(badge["message"], "1/1 checked")
 
 
 class BuildTests(unittest.TestCase):
@@ -84,7 +101,7 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(build_badges.build(path, out), 2)
         self.assertEqual(sorted(p.name for p in out.iterdir()), ["demo-pkg-tree.json", "demo-pkg.json", "older.json"])
         tree = json.loads((out / "demo-pkg-tree.json").read_text(encoding="utf-8"))
-        self.assertEqual(tree["message"], "3/4 platforms")
+        self.assertEqual(tree["message"], "3/4 checked")
         self.assertEqual(json.loads((out / "demo-pkg.json").read_text(encoding="utf-8"))["message"], "4/4 platforms")
 
     def test_a_package_named_like_a_tree_badge_keeps_its_own_badge(self):

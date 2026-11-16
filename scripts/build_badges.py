@@ -14,11 +14,12 @@ label names the Python ("wheels py3.15"), so a badge says what it counts when th
 scan moves to a newer Python.
 
 Packages with whole-tree install data (`install`, the top 500) also get
-<out>/<name>-tree.json: the native platforms where `pip install <name>` gets every
-package in the tree as a wheel, for the newest non-free-threaded Python with install
-data ("wheels+deps py3.14"), with the same colours. A tree with any of those
-platforms not checked gets a grey "partly checked" instead of a count that looks
-complete.
+<out>/<name>-tree.json: of the native platforms whose whole tree the install scan
+checks (scan_install.py: six for 3.14, not win-amd64 or musl-x86_64), how many get
+every package in the tree as a wheel ("5/6 checked"), for the newest non-free-threaded
+Python with a checked install result ("wheels+deps py3.14"), with the same colours.
+A tree with any of those platforms not checked gets a grey "partly checked" instead
+of a count that looks complete.
 """
 
 from __future__ import annotations
@@ -27,6 +28,11 @@ import json
 import re
 import sys
 from pathlib import Path
+
+if __package__:  # imported as scripts.build_badges (the tests, build_pages)
+    from . import install_results
+else:  # run as python scripts/build_badges.py
+    import install_results
 
 SCAN_SCHEMA = 1
 # Results that install without a build. `bundled` is Pyodide's own build (wheelgap --pyodide-lock); the badge
@@ -78,29 +84,25 @@ def badge_for(package: dict, indexes: list[int], python: str) -> dict:
 
 
 TREE_SUFFIX = "-tree"
-CHECKED = ("wheel", "source", "missing")  # an install result that was checked; `not_checked` isn't
 
 
 def tree_badge_for(package: dict, targets: list[dict]) -> dict | None:
-    """The whole-tree badge, or None for a package without install data on a native target."""
-    install = package.get("install")
-    if not isinstance(install, dict) or package.get("error"):
+    """The whole-tree badge, or None for a package without a checked install result on a native target.
+
+    It counts the platforms the install scan covers for that Python, not all the scan's platforms, so the
+    message says "checked": "5/6 checked"."""
+    if package.get("error"):
         return None
-    native = [
-        t for t in targets
-        if t["label"] in install and t["platform"] != "pyodide" and not str(t["python"]).endswith("t")
-    ]
-    if not native:
+    python = install_results.install_python(package, targets)
+    if python is None:
         return None
-    python = max({t["python"] for t in native}, key=python_key)
-    statuses = [(install[t["label"]] or {}).get("status") for t in native if t["python"] == python]
+    statuses = [r.get("status") for t, r in install_results.native_install(package, targets) if t["python"] == python]
     badge = {"schemaVersion": 1, "label": f"wheels+deps py{python}", "cacheSeconds": CACHE_SECONDS}
-    if any(status not in CHECKED for status in statuses):
+    if any(status not in install_results.CHECKED for status in statuses):
         return badge | {"message": "partly checked", "color": "lightgrey"}
     total = len(statuses)
     wheel = statuses.count("wheel")
-    noun = "platform" if total == 1 else "platforms"
-    return badge | {"message": f"{wheel}/{total} {noun}", "color": color(wheel, total)}
+    return badge | {"message": f"{wheel}/{total} checked", "color": color(wheel, total)}
 
 
 def tree_badges(scan: dict) -> dict[str, dict]:

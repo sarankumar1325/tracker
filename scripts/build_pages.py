@@ -21,11 +21,12 @@ from pathlib import Path
 from urllib.parse import quote
 
 if __package__:  # imported as scripts.build_pages (the tests)
-    from . import build_badges, build_campaigns, check_notes, pyodide_locks
+    from . import build_badges, build_campaigns, check_notes, install_results, pyodide_locks
 else:  # run as python scripts/build_pages.py
     import build_badges
     import build_campaigns
     import check_notes
+    import install_results
     import pyodide_locks
 
 SCAN_SCHEMA = 1
@@ -97,33 +98,28 @@ def join_names(names: list[str]) -> str:
 
 
 DESCRIPTION_LIMIT = 160  # about what search engines show under the link
-CHECKED = ("wheel", "source", "missing")  # an install result that was checked; `not_checked` isn't
 
 
 def describe_install(package: dict, targets: list[dict]) -> str | None:
     """The whole-tree answer (#80's `install`), or None without a checked target.
 
-    It's for the newest non-free-threaded Python with a checked native target, which can be older than
-    the newest Python in the scan: install coverage is only scanned for some Pythons. A `not_checked`
-    target is left out of the count, never reported as working, and Pyodide isn't counted."""
-    by_label = {t["label"]: t for t in targets}
-    found = []
-    for label, result in (package.get("install") or {}).items():
-        target = by_label.get(label)
-        if (
-            target is None
-            or str(target["python"]).endswith("t")
-            or target["platform"] not in PLATFORM_NAMES
-            or target["platform"] == "pyodide"
-            or result.get("status") not in CHECKED
-        ):
-            continue
-        found.append((target["python"], target["platform"], result))
-    if not found:
-        return None
-    python = max((py for py, _, _ in found), key=python_key)
+    It's for install_results.install_python(): the newest non-free-threaded Python with a checked native
+    target, which can be older than the newest Python in the scan, as build_badges' tree badge is. A
+    `not_checked` target is left out of the count, never reported as working, and Pyodide isn't counted."""
+    python = install_results.install_python(package, targets)
     order = list(PLATFORM_NAMES)
-    checked = sorted(((pl, r) for py, pl, r in found if py == python), key=lambda item: order.index(item[0]))
+    checked = sorted(
+        (
+            (target["platform"], result)
+            for target, result in install_results.native_install(package, targets)
+            if target["python"] == python
+            and target["platform"] in PLATFORM_NAMES
+            and result.get("status") in install_results.CHECKED
+        ),
+        key=lambda item: order.index(item[0]),
+    )
+    if not checked:
+        return None
     total = len(checked)
     ok = sum(result["status"] == "wheel" for _, result in checked)
     head = f"pip install {package['name']} on Python {python}"
