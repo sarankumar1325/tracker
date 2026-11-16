@@ -96,30 +96,48 @@ def join_names(names: list[str]) -> str:
 
 
 DESCRIPTION_LIMIT = 160  # about what search engines show under the link
+CHECKED = ("wheel", "source", "missing")  # an install result that was checked; `not_checked` isn't
 
 
-def describe_install(package: dict, targets: list[dict], python: str) -> str | None:
-    """The whole-tree answer (#80's `install`) for Python `python`, or None without a checked target.
+def describe_install(package: dict, targets: list[dict]) -> str | None:
+    """The whole-tree answer (#80's `install`), or None without a checked target.
 
-    A `not_checked` target is left out of the count, never reported as working."""
+    It's for the newest non-free-threaded Python with a checked native target, which can be older than
+    the newest Python in the scan: install coverage is only scanned for some Pythons. A `not_checked`
+    target is left out of the count, never reported as working, and Pyodide isn't counted."""
     by_label = {t["label"]: t for t in targets}
-    checked = []
+    found = []
     for label, result in (package.get("install") or {}).items():
         target = by_label.get(label)
-        if target is None or target["python"] != python or target["platform"] not in PLATFORM_NAMES:
+        if (
+            target is None
+            or str(target["python"]).endswith("t")
+            or target["platform"] not in PLATFORM_NAMES
+            or target["platform"] == "pyodide"
+            or result.get("status") not in CHECKED
+        ):
             continue
-        if result.get("status") in ("wheel", "source", "missing"):
-            checked.append((target["platform"], result))
-    if not checked:
+        found.append((target["python"], target["platform"], result))
+    if not found:
         return None
+    python = max((py for py, _, _ in found), key=python_key)
     order = list(PLATFORM_NAMES)
-    checked.sort(key=lambda item: order.index(item[0]))
+    checked = sorted(((pl, r) for py, pl, r in found if py == python), key=lambda item: order.index(item[0]))
     total = len(checked)
     ok = sum(result["status"] == "wheel" for _, result in checked)
-    head = f"pip install {package['name']}"
+    head = f"pip install {package['name']} on Python {python}"
     if ok == total:
-        return f"{head}: wheels for the whole tree on all {total} platforms checked on Python {python}."
-    lead = f"{head}: wheels for the whole tree on {ok} of {total} platforms"
+        lead = f"{head}: wheels for the whole tree on all {total} platforms checked"
+        text = lead + "."
+    else:
+        lead = f"{head}: wheels for the whole tree on {ok} of the {total} platforms checked"
+        text = install_gaps(lead, checked)
+    # The limit holds for every name: drop the details before going over it.
+    return text if len(text) <= DESCRIPTION_LIMIT else lead + "."
+
+
+def install_gaps(lead: str, checked: list[tuple[str, dict]]) -> str:
+    """The lead clause and what goes wrong where, shortened step by step to fit DESCRIPTION_LIMIT."""
 
     def what(result: dict, most: int | None) -> str:
         parts = []
@@ -154,6 +172,7 @@ def describe_install(package: dict, targets: list[dict], python: str) -> str | N
     text = "; ".join(parts) + "."
     if len(text) <= DESCRIPTION_LIMIT:
         return text
+
     def platforms(n: int) -> str:
         return f"{n} platform{'s' if n != 1 else ''}"
 
@@ -165,11 +184,12 @@ def describe_install(package: dict, targets: list[dict], python: str) -> str | N
 def describe(package: dict, columns: dict[str, int], python: str, targets: list[dict] | None = None) -> str:
     """One sentence on the package's gaps for the newest Python, for the meta description.
 
-    With `install` data and targets, the whole-tree answer leads, since that's what `pip install` meets."""
+    With checked `install` data and targets, it's the whole-tree answer instead (see describe_install),
+    since that's what `pip install` meets."""
     name = f"{package['name']} {package['version'] or ''}".strip()
     if package.get("error"):
         return f"{name}: the latest wheelgap scan couldn't look this package up on PyPI."
-    if targets is not None and (whole_tree := describe_install(package, targets, python)):
+    if targets is not None and (whole_tree := describe_install(package, targets)):
         return whole_tree
     if package.get("pure"):
         return f"{name} ships a pure Python wheel."
