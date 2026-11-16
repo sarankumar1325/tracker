@@ -281,6 +281,17 @@ class CampaignTests(unittest.TestCase):
         left_out = page.split("Left out:", 1)[1].split("</p>", 1)[0]
         self.assertIn("1 package has no Alpine ARM64 wheel for Python 3.13 or 3.15 (psycopg2)", left_out)
 
+    def test_previous_python_is_on_the_campaigns_platform(self):
+        # An older Python elsewhere doesn't count: with none on the platform, a new-Python campaign refuses to build.
+        targets = [
+            {"label": "3.13 macos-arm64", "python": "3.13", "platform": "macos-arm64"},
+            {"label": "3.15 linux-x86_64", "python": "3.15", "platform": "linux-x86_64"},
+        ]
+        self.assertIsNone(build_campaigns.previous_python(targets, "3.15", "linux-x86_64"))
+        self.assertEqual(build_campaigns.previous_python(targets, "3.15"), "3.13")
+        with self.assertRaises(SystemExit):
+            build_campaigns.compare_indexes(targets, "3.15", "linux-x86_64", "python")
+
     def test_previous_python_skips_free_threaded_and_newer(self):
         targets = self.scan["targets"] + [{"label": "3.16 linux-x86_64", "python": "3.16", "platform": "linux-x86_64"}]
         self.assertEqual(build_campaigns.previous_python(targets, "3.15"), "3.13")

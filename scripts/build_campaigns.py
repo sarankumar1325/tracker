@@ -205,11 +205,13 @@ def native_indexes(targets: list[dict], python: str, platform: str) -> list[int]
     ]
 
 
-def previous_python(targets: list[dict], python: str) -> str | None:
-    """The newest non-free-threaded Python in the scan older than `python`, or None."""
+def previous_python(targets: list[dict], python: str, platform: str | None = None) -> str | None:
+    """The newest non-free-threaded Python in the scan older than `python` (with a target on `platform`, if given),
+    or None."""
     older = {
         t["python"] for t in targets
         if not str(t["python"]).endswith("t") and python_key(t["python"]) < python_key(python)
+        and (platform is None or t["platform"] == platform)
     }
     return max(older, key=python_key) if older else None
 
@@ -222,7 +224,11 @@ def compare_indexes(targets: list[dict], python: str, platform: str, compare: st
     """
     if compare != "python":
         return native_indexes(targets, python, platform)
-    pythons = {python, previous_python(targets, python)}
+    previous = previous_python(targets, python, platform)
+    if previous is None:
+        # Nothing to compare with: the to-do list would always be empty and the page would say so. Refuse instead.
+        sys.exit(f"build_campaigns: compare = \"python\" needs an older Python than {python} on {platform} in the scan")
+    pythons = {python, previous}
     return [i for i, t in enumerate(targets) if t["platform"] == platform and t["python"] in pythons]
 
 
@@ -326,8 +332,8 @@ def baseline_for(campaign: dict, scan: dict, changes: list[dict], python: str) -
     """The campaign's starting to-do list, from this scan and the change log.
 
     It is today's to-do list, plus packages in the top N that gained a wheel on the target after the
-    campaign's start and were on the to-do list then: no wheel on the target, and a wheel for the
-    campaign's Python on another platform of the same OS (so not "left out"), going by the change log.
+    campaign's start and were on the to-do list then: no wheel on the target, and a wheel on one of
+    compare_indexes' other targets (so not "left out"), going by the change log.
     A baseline recorded after its start is a reconstruction; "recorded" says when it was made.
     """
     platform = campaign["platform"]
@@ -642,7 +648,7 @@ def page(
         "people can work through, one package at a time."
     )
     checked_note = f" {len(errors)} couldn't be looked up in this scan and aren't counted." if errors else ""
-    previous = previous_python(scan["targets"], python) if compare == "python" else None
+    previous = previous_python(scan["targets"], python, platform) if compare == "python" else None
     waiting_html = ""
     if waiting and compare == "python":
         names = ", ".join(e(p["name"]) for p in waiting)
@@ -821,7 +827,7 @@ def index_page(listings: list[dict], generated: str, wheelgap: str) -> str:
   <main class="wrap">
     <section>
       <h2>All campaigns</h2>
-      <p class="note">Coverage is the share of each campaign's top packages with a wheel for its platform and Python. To do counts the packages that have wheels for that Python on other platforms but not this one, or, for a new-Python campaign, a wheel on that platform for the Python before it.</p>
+      <p class="note">Coverage is the share of each campaign's top packages with a wheel for its platform and Python. To do counts the packages that have wheels for that Python on other platforms but not this one, or, for a new-Python campaign, a wheel on that platform for the Python before it but not for the new one.</p>
         <div class="matrix-scroll"><table class="matrix">
           <thead><tr><th>Campaign</th><th>Platform</th><th>Python</th><th>Coverage</th><th>To do</th></tr></thead>
           <tbody>
