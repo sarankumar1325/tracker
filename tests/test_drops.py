@@ -80,6 +80,17 @@ def test_a_partial_upload_that_does_not_complete_is_a_drop_for_what_is_still_mis
     assert state["waiting"] == []
 
 
+def test_a_wheel_uploaded_after_the_drop_was_published_withdraws_it(tmp_path):
+    fresh, state = nights(tmp_path, scan([("pkg", "1.0", [W, W, W])], generated=at(15)),
+                          scan([("pkg", "1.1", [W, W, M])], generated=at(16)),
+                          scan([("pkg", "1.1", [W, W, M])], generated=at(17)))
+    assert [d["target"] for d in state["drops"]] == ["3.14 win-arm64"]
+    # The win-arm64 wheel turns up days later: the drop goes, and nothing else changes.
+    fresh, state = night(tmp_path, scan([("pkg", "1.1", [W, W, M])], generated=at(17)),
+                         scan([("pkg", "1.1", [W, W, W])], generated=at(19)))
+    assert fresh == [] and state["drops"] == [] and state["waiting"] == []
+
+
 def test_a_second_scan_the_same_night_is_not_a_later_scan(tmp_path):
     first = scan([("pkg", "1.1", [W, W, S])], generated=at(16))
     fresh, state = nights(tmp_path, scan([("pkg", "1.0", [W, W, W])], generated=at(15)), first,

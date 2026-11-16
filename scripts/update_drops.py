@@ -145,6 +145,10 @@ def compare(old: dict, new: dict, state: dict) -> list[dict]:
         name, version = pkg["name"], pkg["version"]
         if pkg.get("error") or not version:
             continue  # nothing to compare tonight; a waiting release keeps waiting
+        # A wheel that arrived after its drop was published (a late upload): that drop wasn't real, so withdraw it.
+        results = dict(zip(new_labels, pkg["results"]))
+        state["drops"] = [d for d in state["drops"]
+                          if not (d["name"] == name and d["version"] == version and results.get(d["target"]) == "wheel")]
         wait = waiting.get(name)
         if wait is not None:
             if version == wait["from"] or went_back(wait["version"], version):
