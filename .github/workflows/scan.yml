@@ -96,6 +96,10 @@ jobs:
         # Extra data: if it fails, still commit the night's scan (the script writes changes.json last).
         continue-on-error: true
         run: python3 scripts/update_changes.py previous.json data/coverage.json data/changes.json
+      - name: Record the platforms new releases dropped
+        # Extra data, like the step above: if it fails, still commit the night's scan.
+        continue-on-error: true
+        run: python3 scripts/update_drops.py previous.json data/coverage.json data/drops.json
       - name: Record new campaigns' starting to-do lists
         # Writes data/campaigns/<id>.json once per campaign and never rewrites it. Extra data too:
         # if it fails, warn and still commit the night's scan; the next scan tries again.
@@ -109,6 +113,7 @@ jobs:
             data/coverage.json
             data/history.json
             data/changes.json
+            data/drops.json
             data/campaigns/
 
   pip-check:
@@ -172,6 +177,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/coverage.json data/history.json data/changes.json
+          if [ -f data/drops.json ] && [ ! -L data/drops.json ]; then git add data/drops.json; fi
           # The pip cross-check's file also comes from a job that ran third-party code: commit it only if it has
           # exactly the shape check_pip.py writes (stdlib check, size cap). Otherwise the previous one stays.
           if [ -f agreement/agreement.json ] && [ ! -L agreement/agreement.json ]; then
@@ -235,6 +241,10 @@ jobs:
           python3 scripts/build_badges.py data/coverage.json _site/badge
           python3 scripts/build_pages.py data/coverage.json _site
           python3 scripts/build_campaigns.py data/coverage.json data/history.json data/changes.json campaigns.toml _site
+          # Extra page: a malformed drops.json warns and leaves it out rather than stopping the deploy.
+          if ! python3 scripts/build_drops.py data/drops.json data/coverage.json _site; then
+            echo "::warning::build_drops failed, so the Dropped platforms page and feed aren't published this time"
+          fi
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _site
