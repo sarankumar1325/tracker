@@ -181,7 +181,7 @@ def _read_file(
             out.append(f"{prefix}: expected a table")
             continue
         if retired is not None:
-            note = _retire_unscanned(prefix, note, pythons, retired)
+            note = _retire_unscanned(prefix, note, pythons, retired, pairs, allowed)
             if note is None:
                 continue
         out.extend(_note_problems(prefix, note, allowed, pythons, pairs))
@@ -189,8 +189,17 @@ def _read_file(
     return (kept if retired is not None else notes), out
 
 
-def _retire_unscanned(prefix: str, note: dict, pythons: set[str], retired: list[str]) -> dict | None:
-    """The note without the Python labels the scan no longer covers, or None when none is left.
+def _retire_unscanned(
+    prefix: str,
+    note: dict,
+    pythons: set[str],
+    retired: list[str],
+    pairs: set[tuple[str, str]] | None = None,
+    allowed: set[str] = frozenset(),
+) -> dict | None:
+    """The note without the Python labels the scan no longer covers, or None when none is left, or when what's left
+    has no scanned target among its platforms (pyodide on python = ["3.13", "3.14t"] once 3.13 is dropped: pyodide
+    has no 3.14t), which would otherwise leave the whole file out.
 
     Only a well-formed `python` list (non-empty, all strings) is touched; anything else is left for
     _note_problems to report.
@@ -205,6 +214,15 @@ def _retire_unscanned(prefix: str, note: dict, pythons: set[str], retired: list[
     if not scanned:
         retired.append(f"retiring {prefix}: python {', '.join(dropped)} is no longer scanned")
         return None
+    listed_platforms = note.get("platforms")
+    if pairs is not None and isinstance(listed_platforms, list) and all(isinstance(x, str) for x in listed_platforms):
+        platforms = allowed if listed_platforms == ["all"] else set(listed_platforms)
+        if not any((pl, py) in pairs for pl in platforms for py in scanned):
+            retired.append(
+                f"retiring {prefix}: python {', '.join(dropped)} is no longer scanned, and the scan has no "
+                f"target for its platforms on {', '.join(scanned)}"
+            )
+            return None
     return {**note, "python": scanned}
 
 

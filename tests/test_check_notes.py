@@ -355,6 +355,24 @@ class CheckNotesTests(unittest.TestCase):
         self.assertEqual(notes["psycopg2"][0]["python"], ["3.13"])
         self.assertEqual(warnings, [])
 
+    def test_load_retires_a_trimmed_note_left_without_a_scanned_target(self):
+        # pyodide on 3.13 or 3.14t: once 3.13 is dropped, pyodide has no 3.14t target, so the note can never apply.
+        targets = [
+            {"label": "3.14t musl-aarch64", "python": "3.14t", "platform": "musl-aarch64"},
+            {"label": "3.14 pyodide", "python": "3.14", "platform": "pyodide"},
+        ]
+        self.write(
+            "psycopg2.toml",
+            note_toml(platforms='["pyodide"]', python='["3.13", "3.14t"]', text="Old workaround.")
+            + "\n"
+            + note_toml(text="Use the binary extra."),
+        )
+        warnings = []
+        notes = check_notes.load(self.notes, coverage(targets), warn=warnings.append)
+        self.assertEqual([n["text"] for n in notes["psycopg2"]], ["Use the binary extra."])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("retiring psycopg2.toml note 1", warnings[0])
+
     def test_problems_still_reports_a_dropped_python(self):
         self.write("psycopg2.toml", note_toml(python='["3.12", "3.13"]'))
         found = self.problems(coverage(PYTHON_TARGETS))
