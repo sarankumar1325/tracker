@@ -3,8 +3,8 @@
     python scripts/build_pages.py data/coverage.json _site [notes_dir]
 
 Writes <site>/p/<name>/index.html for each package (PEP 503 canonical name) and
-<site>/sitemap.xml listing the main page and every package page. Each page shows
-the package's current notes from notes_dir (default: the repository's notes/) and,
+<site>/sitemap.xml listing the main page, the repo checker and every package page, plus a
+robots.txt naming the sitemap. Each page shows the package's current notes from notes_dir (default: the repository's notes/) and,
 when it has a gap, an "Add a note" link. A `bundled` cell says which version Pyodide ships
 (from the committed lock files, see pyodide_locks.py). Runs at publish time; the files are not
 committed. The pages are plain HTML (no JavaScript) and reuse site/style.css, so
@@ -406,14 +406,24 @@ def build(
         note_file = notes_dir is not None and (notes_dir / f"{name}.toml").exists()
         text = page(p, scan, python, notes.get(name), note_file, found, memberships.get(name))
         (out / "index.html").write_text(text, encoding="utf-8")
-    urls = [BASE_URL] + [f"{BASE_URL}p/{name}/" for name in names]
+    urls = [BASE_URL, f"{BASE_URL}check/"] + [f"{BASE_URL}p/{name}/" for name in names]
     sitemap = "".join(f"  <url><loc>{html.escape(u)}</loc></url>\n" for u in urls)
     (site / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{sitemap}</urlset>\n',
         encoding="utf-8",
     )
+    (site / "robots.txt").write_text(robots_txt(), encoding="utf-8")
     return len(names)
+
+
+def robots_txt() -> str:
+    """Allow everything and name the sitemap.
+
+    Crawlers read robots.txt only at a host's root, so under github.io's /tracker/ this file is
+    ignored; it starts working if the site moves to its own domain or root. Until then the sitemap
+    is found through the links on the pages, or by submitting it to a search engine by hand."""
+    return f"User-agent: *\nAllow: /\n\nSitemap: {BASE_URL}sitemap.xml\n"
 
 
 if __name__ == "__main__":

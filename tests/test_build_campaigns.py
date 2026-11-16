@@ -1,5 +1,6 @@
 """Offline checks for the campaign pages and their index."""
 
+import re
 import json
 import subprocess
 import sys
@@ -848,6 +849,27 @@ python = "3.13"
         build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
         sitemap = (self.site / "sitemap.xml").read_text(encoding="utf-8")
         self.assertIn("<loc>https://wheelgap.github.io/tracker/campaigns/</loc>", sitemap)
+
+    def test_sitemap_lists_the_repo_checker_once_after_the_campaigns(self):
+        self.write_inputs()
+        build_pages.build(self.coverage, self.site)
+        build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
+        sitemap = (self.site / "sitemap.xml").read_text(encoding="utf-8")
+        locs = re.findall(r"<loc>([^<]*)</loc>", sitemap)
+        self.assertEqual(locs[:2], ["https://wheelgap.github.io/tracker/", "https://wheelgap.github.io/tracker/check/"])
+        self.assertEqual(len(locs), len(set(locs)))
+        self.assertIn("https://wheelgap.github.io/tracker/campaigns/", locs)
+        # The URL is a real page in the published site.
+        self.assertTrue((Path(__file__).resolve().parents[1] / "site" / "check" / "index.html").exists())
+
+    def test_robots_txt_allows_all_and_names_the_sitemap(self):
+        self.write_inputs()
+        build_pages.build(self.coverage, self.site)
+        robots = (self.site / "robots.txt").read_text(encoding="utf-8")
+        self.assertEqual(
+            robots.splitlines(),
+            ["User-agent: *", "Allow: /", "", "Sitemap: https://wheelgap.github.io/tracker/sitemap.xml"],
+        )
 
     def test_home_page_footer_links_the_campaigns_index(self):
         home = (Path(__file__).resolve().parents[1] / "site" / "index.html").read_text(encoding="utf-8")
