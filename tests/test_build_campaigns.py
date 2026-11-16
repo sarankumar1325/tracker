@@ -311,6 +311,40 @@ class CampaignTests(unittest.TestCase):
         )
         self.assertEqual([item["name"] for item in todo], ["newpy"])
 
+    def test_recorded_baseline_keeps_its_compare(self):
+        # #103: the rule a starting list was built by is recorded with it.
+        self.recordable('python = "3.15"\ncompare = "python"\n')
+        self.assertEqual(self.record(), ["musl-aarch64"])
+        baseline = json.loads((self.root / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+        self.assertEqual(baseline["compare"], "python")
+        self.recordable()
+        (self.root / "campaigns" / "musl-aarch64.json").unlink()
+        self.assertEqual(self.record(), ["musl-aarch64"])
+        baseline = json.loads((self.root / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+        self.assertEqual(baseline["compare"], "platform")
+
+    def test_baseline_for_another_compare_shows_no_count(self):
+        # Recorded by the platform rule, read by a new-Python campaign: Done would count against the wrong list.
+        self.config.write_text(CONFIG + 'python = "3.15"\ncompare = "python"\n', encoding="utf-8")
+        for fields in ({"compare": "platform"}, {}):  # a baseline from before #103 has no compare: platform
+            with self.subTest(fields=fields):
+                self.write_baseline(**fields)
+                done = self.done(self.built_page())
+                self.assertIn("was recorded for other settings (compare platform)", done)
+                self.assertNotIn("<strong>", done)
+
+    def test_baseline_without_compare_still_matches_a_platform_campaign(self):
+        self.write_baseline()  # no compare, as every baseline recorded before #103
+        done = self.done(self.built_page())
+        self.assertNotIn("No progress to show", done)
+        self.assertIn("<strong>", done)
+
+    def test_bad_baseline_compare_is_rejected(self):
+        self.write_baseline(compare="os")
+        self.write_inputs()
+        with self.assertRaisesRegex(SystemExit, "compare must be one of"):
+            build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
+
     def test_bad_compare_is_rejected(self):
         for extra, message in (('compare = "os"\n', "compare must be one of"),
                                ('compare = "python"\n', "needs a python")):

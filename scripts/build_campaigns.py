@@ -366,6 +366,8 @@ def baseline_for(campaign: dict, scan: dict, changes: list[dict], python: str) -
         "start": start,
         "recorded": str(scan["generated"])[:10],
         "wheelgap": str(scan["wheelgap"]),
+        # The rule the list was built by, so a later change of compare shows as a mismatch (#103).
+        "compare": campaign.get("compare", "platform"),
         "packages": sorted(rows.values(), key=lambda r: r["rank"]),
     }
 
@@ -402,6 +404,9 @@ def load_baseline(path: Path) -> dict | None:
             sys.exit(f"build_campaigns: {path} is missing {field!r}")
     if not isinstance(data.get("top"), int) or isinstance(data.get("top"), bool):
         sys.exit(f"build_campaigns: {path} is missing 'top'")
+    # Baselines recorded before #103 have no compare: they were all built by the platform rule.
+    if data.setdefault("compare", "platform") not in COMPARE:
+        sys.exit(f"build_campaigns: {path} compare must be one of {', '.join(map(repr, COMPARE))}")
     # A hand edit can repeat a package; count it once.
     seen: set[str] = set()
     data["packages"] = [
@@ -412,8 +417,15 @@ def load_baseline(path: Path) -> dict | None:
 
 def baseline_mismatch(baseline: dict, campaign: dict, label: str) -> list[str]:
     """The settings a recorded baseline doesn't share with campaigns.toml, as "field: baseline value"."""
-    expected = {"campaign": campaign["id"], "top": campaign["top"], "start": campaign["start"], "target": label}
-    return [f"{field} {baseline.get(field)}" for field, value in expected.items() if baseline.get(field) != value]
+    expected = {
+        "campaign": campaign["id"],
+        "top": campaign["top"],
+        "start": campaign["start"],
+        "target": label,
+        "compare": campaign.get("compare", "platform"),
+    }
+    recorded = {"compare": "platform", **baseline}  # a baseline without compare was built by the platform rule
+    return [f"{field} {recorded.get(field)}" for field, value in expected.items() if recorded.get(field) != value]
 
 
 def done_list(baseline: dict, packages: list[dict], index: int, label: str, changes: list[dict]) -> list[dict]:
