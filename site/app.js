@@ -360,6 +360,7 @@ async function main() {
     state.platform = b.dataset.platform;
     state.shown = PAGE;
     renderAll();
+    renderLookup($("search").value); // its "Why?" command names the selected platform
     $("gaps-title").scrollIntoView({ behavior: "smooth", block: "start" });
   });
   $("more").addEventListener("click", () => {

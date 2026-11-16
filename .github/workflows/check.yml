@@ -36,4 +36,4 @@ jobs:
         run: node --check site/logic.js && node --check site/app.js && node --check site/lab.js && for f in site/check/*.mjs; do node --check "$f"; done
       - name: Site logic
         # The runner's own node; node:test needs nothing installed.
-        run: node --test tests/site/logic.test.js tests/site/scripts.test.js tests/site/check-logic.test.mjs
+        run: node --test tests/site/logic.test.js tests/site/scripts.test.js tests/site/check-logic.test.mjs tests/site/app.test.js
