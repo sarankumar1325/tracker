@@ -205,6 +205,21 @@ class DescribeWholeTreeTests(unittest.TestCase):
         self.assertEqual(self.describe(self.package(install)),
                          "pip install mcp on Python 3.14: wheels for the whole tree on all 8 platforms checked.")
 
+    def test_one_checked_platform_is_named_not_counted(self):
+        install = self.install()
+        for label in install:
+            if label != "3.14 linux-x86_64":
+                install[label] = {"status": "not_checked", "blockers": []}
+        self.assertEqual(self.describe(self.package(install)),
+                         "pip install mcp on Python 3.14: wheels for the whole tree on Linux x86_64, the only platform "
+                         "checked.")
+        install["3.14 linux-x86_64"] = {"status": "source", "blockers": [blocker("cryptography")]}
+        text = self.describe(self.package(install))
+        self.assertTrue(text.startswith("pip install mcp on Python 3.14: no wheels for the whole tree on Linux x86_64, "
+                                        "the only platform checked"), text)
+        self.assertNotIn("all 1", text)
+        self.assertNotIn("of the 1", text)
+
     def test_a_newer_python_without_install_results_uses_the_newest_checked_one(self):
         # coverage.json scans 3.15, but install coverage (scripts/scan_install.py) only checks 3.14.
         self.targets += [{"label": f"3.15 {pl}", "python": "3.15", "platform": pl} for pl in self.PLATFORMS]

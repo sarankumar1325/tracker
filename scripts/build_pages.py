@@ -126,11 +126,14 @@ def describe_install(package: dict, targets: list[dict]) -> str | None:
     total = len(checked)
     ok = sum(result["status"] == "wheel" for _, result in checked)
     head = f"pip install {package['name']} on Python {python}"
+    only = PLATFORM_NAMES[checked[0][0]] if total == 1 else None  # one platform checked: name it, never "all 1"
     if ok == total:
-        lead = f"{head}: wheels for the whole tree on all {total} platforms checked"
+        where = f"on {only}, the only platform checked" if only else f"on all {total} platforms checked"
+        lead = f"{head}: wheels for the whole tree {where}"
         text = lead + "."
     else:
-        lead = f"{head}: wheels for the whole tree on {ok} of the {total} platforms checked"
+        where = f"on {only}, the only platform checked" if only else f"on {ok} of the {total} platforms checked"
+        lead = f"{head}: {'no wheels for the whole tree' if only else 'wheels for the whole tree'} {where}"
         text = install_gaps(lead, checked)
     # The limit holds for every name: drop the details before going over it.
     return text if len(text) <= DESCRIPTION_LIMIT else lead + "."
@@ -335,7 +338,7 @@ def page(
     pys = list(dict.fromkeys(t["python"] for t in targets))
     platforms = [pl for pl in PLATFORM_NAMES if any(t["platform"] == pl for t in targets)]
     index = {(t["python"], t["platform"]): i for i, t in enumerate(targets)}
-    # The native platforms, like the badge, so the description and the badge give the same count.
+    # The native platforms, like the badge (the install-led description counts only the platforms it checked).
     columns = {pl: index[(python, pl)] for pl in platforms if pl != "pyodide" and (python, pl) in index}
     e = html.escape
     name, version = package["name"], package["version"] or ""
