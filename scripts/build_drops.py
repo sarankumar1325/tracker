@@ -1,11 +1,12 @@
 """Publish the dropped platforms (#75): a page and an Atom feed from data/drops.json.
 
-    python scripts/build_drops.py data/drops.json _site
+    python scripts/build_drops.py data/drops.json data/coverage.json _site
 
 Writes <site>/drops/index.html (the latest drops, newest first) and <site>/drops.xml (an Atom feed,
-one entry per release that dropped a platform), and adds the page to <site>/sitemap.xml. The JSON
-itself is published as data/drops.json with the rest of data/. Runs at publish time; nothing is
-committed. Plain HTML, no JavaScript, under the site's usual CSP.
+one entry per release that dropped a platform), and adds the page to <site>/sitemap.xml. A package
+links to its page on this site while it's in the current scan (coverage.json), and to PyPI once it
+has left the top N. The JSON itself is published as data/drops.json with the rest of data/. Runs at
+publish time; nothing is committed. Plain HTML, no JavaScript, under the site's usual CSP.
 """
 
 from __future__ import annotations
@@ -39,14 +40,17 @@ def releases(drops: list[dict]) -> list[dict]:
     return list(grouped.values())
 
 
-def page_url(name: str) -> str:
-    return f"../p/{build_campaigns.canonical(name)}/"
+def package_url(name: str, scanned: set[str], prefix: str) -> str:
+    """The package's page under `prefix` (the site root, relative or absolute) while it's in the current
+    scan, so the page exists; its PyPI page once it has left the top N."""
+    key = build_campaigns.canonical(name)
+    return f"{prefix}p/{key}/" if key in scanned else f"https://pypi.org/project/{key}/"
 
 
-def page(items: list[dict], waiting: int) -> str:
+def page(items: list[dict], waiting: int, scanned: set[str]) -> str:
     e = html.escape
     rows = "\n".join(
-        f'          <tr><td>{e(r["date"])}</td><td><a href="{e(page_url(r["name"]))}">{e(r["name"])}</a></td>'
+        f'          <tr><td>{e(r["date"])}</td><td><a href="{e(package_url(r["name"], scanned, "../"))}">{e(r["name"])}</a></td>'
         f'<td>{e(r["from"])} → <strong>{e(r["version"])}</strong></td>'
         f'<td>{e(", ".join(r["targets"]))}</td></tr>'
         for r in items[:PAGE_LIMIT]
@@ -61,7 +65,7 @@ def page(items: list[dict], waiting: int) -> str:
     )
     more = f" The page shows the latest {PAGE_LIMIT}." if len(items) > PAGE_LIMIT else ""
     pending = (
-        f" {waiting} new release{'' if waiting == 1 else 's'} with no wheel yet (maybe still uploading) "
+        f" {waiting} new release{'' if waiting == 1 else 's'} missing wheels (maybe still uploading) "
         f"{'is' if waiting == 1 else 'are'} waiting for a later scan."
         if waiting
         else ""
@@ -89,7 +93,7 @@ def page(items: list[dict], waiting: int) -> str:
   <main class="wrap">
     <section>
       <h2>Latest drops</h2>
-      <p class="note">Compared with the release the previous nightly scan saw. A release with no wheel at all yet waits for a later scan, and a release that is yanked is taken off the list.{pending}{more} Subscribe: <a href="../drops.xml">Atom feed</a>. As JSON: <a href="../data/drops.json">data/drops.json</a>.</p>
+      <p class="note">Compared with the release the previous nightly scan saw. A missing wheel is listed only if the next night's scan still finds the same release without it, since wheels are often still uploading the night a release comes out; a release with no wheel at all yet waits until one shows up (up to a week), and a release that is yanked is taken off the list. When a release has no wheel left for one Python version (it ended support for that Python), that Python's platforms aren't listed.{pending}{more} Subscribe: <a href="../drops.xml">Atom feed</a>. As JSON: <a href="../data/drops.json">data/drops.json</a>.</p>
 {body}    </section>
   </main>
 </body>
@@ -97,16 +101,16 @@ def page(items: list[dict], waiting: int) -> str:
 """
 
 
-def feed(items: list[dict], updated: str) -> str:
+def feed(items: list[dict], updated: str, scanned: set[str]) -> str:
     x = xml_escape
     entries = []
     for r in items[:FEED_LIMIT]:
         targets = ", ".join(r["targets"])
-        ident = f"{BASE_URL}drops/#{r['name']}-{r['version']}"
+        ident = f"{BASE_URL}drops/#{build_campaigns.canonical(r['name'])}-{r['version']}"
         entries.append(
             "  <entry>\n"
             f"    <title>{x(r['name'])} {x(r['version'])} dropped {x(targets)}</title>\n"
-            f'    <link href="{x(BASE_URL)}p/{x(build_campaigns.canonical(r["name"]))}/"/>\n'
+            f'    <link href="{html.escape(package_url(r["name"], scanned, BASE_URL))}"/>\n'
             f"    <id>{x(ident)}</id>\n"
             f"    <updated>{x(r['date'])}T00:00:00Z</updated>\n"
             f"    <summary>{x(r['name'])} {x(r['from'])} had a wheel for {x(targets)}; {x(r['version'])} has none.</summary>\n"
@@ -126,17 +130,19 @@ def feed(items: list[dict], updated: str) -> str:
     )
 
 
-def build(drops_path: Path, site: Path) -> int:
+def build(drops_path: Path, coverage_path: Path, site: Path) -> int:
     data = json.loads(drops_path.read_text(encoding="utf-8")) if drops_path.exists() else {"drops": [], "waiting": []}
+    scan = json.loads(coverage_path.read_text(encoding="utf-8"))
+    scanned = {build_campaigns.canonical(p["name"]) for p in scan["packages"]}
     items = releases(data.get("drops", []))
     (site / "drops").mkdir(parents=True, exist_ok=True)
-    (site / "drops" / "index.html").write_text(page(items, len(data.get("waiting", []))), encoding="utf-8")
+    (site / "drops" / "index.html").write_text(page(items, len(data.get("waiting", [])), scanned), encoding="utf-8")
     updated = items[0]["date"] if items else datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    (site / "drops.xml").write_text(feed(items, updated), encoding="utf-8")
+    (site / "drops.xml").write_text(feed(items, updated, scanned), encoding="utf-8")
     build_campaigns.add_to_sitemap(site, [f"{BASE_URL}drops/"])
     return len(items)
 
 
 if __name__ == "__main__":
-    drops, site = (Path(p) for p in sys.argv[1:3])
-    print(f"drops: {build(drops, site)} releases on the page")
+    drops, coverage, site = (Path(p) for p in sys.argv[1:4])
+    print(f"drops: {build(drops, coverage, site)} releases on the page")
