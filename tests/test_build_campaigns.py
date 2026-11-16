@@ -634,6 +634,67 @@ class CampaignTests(unittest.TestCase):
                 self.assertNotIn("<s>", done)
                 self.assertNotIn("<musl>", done)
 
+    def status(self) -> dict:
+        self.built_page()
+        return json.loads((self.site / "data" / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+
+    def test_status_file_has_the_page_numbers_and_lists(self):
+        self.write_baseline()
+        status = self.status()
+        self.assertEqual(
+            {k: status[k] for k in ("schema", "generated", "campaign", "target", "platform", "python", "top", "start",
+                                    "share", "wheels", "total")},
+            {"schema": 1, "generated": "2026-11-11T00:00:00+00:00", "campaign": "musl-aarch64",
+             "target": "3.15 musl-aarch64", "platform": "musl-aarch64", "python": "3.15", "top": 5,
+             "start": "2026-11-10", "share": 50.0, "wheels": 2, "total": 4},
+        )
+        self.assertEqual(status["url"], "https://wheelgap.github.io/tracker/campaigns/musl-aarch64/")
+        self.assertEqual(status["todo"], [{"rank": 2, "name": "psycopg2", "version": "2.9", "status": "source"}])
+        self.assertEqual(status["has_alternative"], [])
+        self.assertEqual(status["done"], [{"name": "NumPy", "version": "2.0", "date": "2026-11-11", "was": "source"}])
+        self.assertEqual(status["baseline"]["recorded"], "2026-11-10")
+        self.assertEqual(status["baseline"]["mismatch"], [])
+        self.assertEqual([p["name"] for p in status["baseline"]["packages"]], ["NumPy", "psycopg2", "newpy"])
+        index = json.loads((self.site / "data" / "campaigns.json").read_text(encoding="utf-8"))
+        self.assertEqual(index["schema"], 1)
+        self.assertEqual(
+            index["campaigns"],
+            [{"id": "musl-aarch64", "title": "musllinux aarch64 wheels for the top 500", "platform": "musl-aarch64",
+              "python": "3.15", "share": 50.0, "wheels": 2, "total": 4, "todo": 1,
+              "url": "https://wheelgap.github.io/tracker/campaigns/musl-aarch64/",
+              "data": "https://wheelgap.github.io/tracker/data/campaigns/musl-aarch64.json"}],
+        )
+
+    def test_status_file_moves_alternatives_and_keeps_note_links(self):
+        self.page_with_note("alternative")
+        status = json.loads((self.site / "data" / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["todo"], [])
+        self.assertEqual(
+            status["has_alternative"],
+            [{"rank": 2, "name": "psycopg2", "version": "2.9", "status": "source",
+              "note": "https://github.com/wheelgap/tracker/blob/main/notes/psycopg2.toml"}],
+        )
+
+    def test_status_file_for_a_baseline_with_other_settings_has_no_done_list(self):
+        self.write_baseline(top=500)
+        status = self.status()
+        self.assertIsNone(status["done"])
+        self.assertEqual(status["baseline"]["mismatch"], ["top 500"])
+
+    def test_status_file_without_a_baseline_yet(self):
+        status = self.status()
+        self.assertIsNone(status["baseline"]["recorded"])
+        self.assertEqual(status["baseline"]["mismatch"], [])
+        # Today's to-do list plus the packages that gained the wheel since the start.
+        self.assertEqual([p["name"] for p in status["baseline"]["packages"]], ["NumPy", "psycopg2"])
+        self.assertEqual([d["name"] for d in status["done"]], ["NumPy"])
+
+    def test_pages_link_the_status_files(self):
+        page = self.built_page()
+        self.assertIn('<a href="../../data/campaigns/musl-aarch64.json">', page)
+        index = (self.site / "campaigns" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<a href="../data/campaigns.json">', index)
+
     def test_bad_baseline_is_rejected(self):
         for fields in ({"schema": 2}, {"packages": [{"rank": 1}]}, {"start": None}, {"campaign": None},
                        {"top": "5"}, {"top": True}):
