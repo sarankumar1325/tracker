@@ -404,8 +404,9 @@ def load_baseline(path: Path) -> dict | None:
             sys.exit(f"build_campaigns: {path} is missing {field!r}")
     if not isinstance(data.get("top"), int) or isinstance(data.get("top"), bool):
         sys.exit(f"build_campaigns: {path} is missing 'top'")
-    # Baselines recorded before #103 have no compare: they were all built by the platform rule.
-    if data.setdefault("compare", "platform") not in COMPARE:
+    # Baselines recorded before #103 have no compare. They were built by whatever rule their campaign had then (the
+    # 3.15 one by "python"), so a missing compare isn't checked, rather than guessed.
+    if "compare" in data and data["compare"] not in COMPARE:
         sys.exit(f"build_campaigns: {path} compare must be one of {', '.join(map(repr, COMPARE))}")
     # A hand edit can repeat a package; count it once.
     seen: set[str] = set()
@@ -424,8 +425,9 @@ def baseline_mismatch(baseline: dict, campaign: dict, label: str) -> list[str]:
         "target": label,
         "compare": campaign.get("compare", "platform"),
     }
-    recorded = {"compare": "platform", **baseline}  # a baseline without compare was built by the platform rule
-    return [f"{field} {recorded.get(field)}" for field, value in expected.items() if recorded.get(field) != value]
+    if "compare" not in baseline:  # recorded before #103: built by the campaign's own rule at the time, not checked
+        del expected["compare"]
+    return [f"{field} {baseline.get(field)}" for field, value in expected.items() if baseline.get(field) != value]
 
 
 def done_list(baseline: dict, packages: list[dict], index: int, label: str, changes: list[dict]) -> list[dict]:

@@ -326,12 +326,18 @@ class CampaignTests(unittest.TestCase):
     def test_baseline_for_another_compare_shows_no_count(self):
         # Recorded by the platform rule, read by a new-Python campaign: Done would count against the wrong list.
         self.config.write_text(CONFIG + 'python = "3.15"\ncompare = "python"\n', encoding="utf-8")
-        for fields in ({"compare": "platform"}, {}):  # a baseline from before #103 has no compare: platform
-            with self.subTest(fields=fields):
-                self.write_baseline(**fields)
-                done = self.done(self.built_page())
-                self.assertIn("was recorded for other settings (compare platform)", done)
-                self.assertNotIn("<strong>", done)
+        self.write_baseline(compare="platform")
+        done = self.done(self.built_page())
+        self.assertIn("was recorded for other settings (compare platform)", done)
+        self.assertNotIn("<strong>", done)
+
+    def test_baseline_from_before_compare_isnt_checked_on_it(self):
+        # The 3.15 campaign's list may be recorded before #103 lands, by the python rule but with no compare field:
+        # that must not show as a mismatch.
+        self.config.write_text(CONFIG + 'python = "3.15"\ncompare = "python"\n', encoding="utf-8")
+        self.write_baseline()
+        done = self.done(self.built_page())
+        self.assertNotIn("No progress to show", done)
 
     def test_baseline_without_compare_still_matches_a_platform_campaign(self):
         self.write_baseline()  # no compare, as every baseline recorded before #103
