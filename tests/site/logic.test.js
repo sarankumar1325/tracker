@@ -17,7 +17,7 @@ test("bundled packages aren't gaps; source, missing and unknown are", () => {
 test("the bar's share counts wheel and bundled", () => {
   const s = { wheel: 70, bundled: 10, source: 0, missing: 19, unknown: 1 };
   const prev = { wheel: 69, bundled: 10, source: 0, missing: 20, unknown: 1 };
-  const stats = logic.platformStats(s, prev, 100);
+  const stats = logic.platformStats(s, prev, 100, "0.9.0", "0.9.0");
   assert.equal(stats.ok, 80);
   assert.equal(stats.percent, 80);
   assert.equal(stats.delta, 1);
@@ -25,17 +25,35 @@ test("the bar's share counts wheel and bundled", () => {
 });
 
 test("no delta on the night bundled is first counted", () => {
-  const stats = logic.platformStats({ wheel: 70, bundled: 10, missing: 20 }, { wheel: 70, missing: 30 }, 100);
+  const stats = logic.platformStats({ wheel: 70, bundled: 10, missing: 20 }, { wheel: 70, missing: 30 }, 100, "0.9.0", "0.9.0");
   assert.equal(stats.delta, 0);
   assert.equal(stats.percent, 80);
-  const zero = logic.platformStats({ wheel: 70, bundled: 10, missing: 20 }, { wheel: 70, bundled: 0, missing: 30 }, 100);
+  const zero = logic.platformStats({ wheel: 70, bundled: 10, missing: 20 }, { wheel: 70, bundled: 0, missing: 30 }, 100, "0.9.0", "0.9.0");
   assert.equal(zero.delta, 0);
 });
 
 test("a scan without bundled counts reads as before", () => {
-  const stats = logic.platformStats({ wheel: 90, source: 5, missing: 5, unknown: 0 }, { wheel: 88 }, 100);
+  const stats = logic.platformStats({ wheel: 90, source: 5, missing: 5, unknown: 0 }, { wheel: 88 }, 100, "0.9.0", "0.9.0");
   assert.deepEqual([stats.bundled, stats.ok, stats.delta, stats.percent], [0, 90, 2, 90]);
   assert.equal(stats.widths.bundled, 0);
+});
+
+test("no delta across a wheelgap upgrade (#58)", () => {
+  const s = { wheel: 74, missing: 26 };
+  const prev = { wheel: 70, missing: 30 };
+  assert.equal(logic.platformStats(s, prev, 100, "0.9.0", "0.9.0").delta, 4);
+  const upgraded = logic.platformStats(s, prev, 100, "0.7.0", "0.9.0");
+  assert.equal(upgraded.delta, 0);
+  assert.equal(upgraded.ok, 74);
+  assert.equal(upgraded.percent, 74);
+});
+
+test("no delta when the previous night didn't record its wheelgap version (#58)", () => {
+  const s = { wheel: 74, missing: 26 };
+  const prev = { wheel: 70, missing: 30 };
+  assert.equal(logic.platformStats(s, prev, 100, undefined, "0.9.0").delta, 0);
+  assert.equal(logic.platformStats(s, prev, 100, "", "0.9.0").delta, 0);
+  assert.equal(logic.platformStats(s, prev, 100, "0.9.0", undefined).delta, 0);
 });
 
 test("malformed pyodide.json gives no releases instead of throwing", () => {

@@ -24,13 +24,16 @@ function gapsAt(packages, i) {
   return packages.filter((p) => !installable(p.results[i]));
 }
 
-// One platform bar's numbers from a summary cell and the previous night's (or null).
-function platformStats(s, prev, n) {
+// One platform bar's numbers from a summary cell and the previous night's (or null). prevWheelgap and wheelgap are
+// the wheelgap versions behind the previous night and this scan: a night that ran another version isn't like for
+// like (update_changes.py and the campaign trend skip it the same way), nor is one that didn't record its version.
+function platformStats(s, prev, n, prevWheelgap, wheelgap) {
   const count = (cell, k) => (cell && isCount(cell[k]) ? cell[k] : 0);
   const bundled = count(s, "bundled");
   const ok = count(s, "wheel") + bundled; // installs without a build
+  const sameWheelgap = isText(prevWheelgap) && prevWheelgap === wheelgap;
   // A previous night that counted nothing as bundled here (no --pyodide-lock yet) isn't like for like.
-  const comparable = Boolean(prev) && !(bundled && !count(prev, "bundled"));
+  const comparable = Boolean(prev) && sameWheelgap && !(bundled && !count(prev, "bundled"));
   const delta = comparable ? ok - (count(prev, "wheel") + count(prev, "bundled")) : 0;
   const share = (k) => (n ? (100 * count(s, k)) / n : 0);
   return { bundled, ok, delta, percent: n ? (100 * ok) / n : 0, widths: Object.fromEntries(

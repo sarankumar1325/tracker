@@ -102,20 +102,22 @@ function renderTabs() {
     .join("");
 }
 
-function previousSummary(label) {
+// The night before the latest scan in data/history.json, or null.
+function previousScan() {
   const h = state.history;
-  return h.length > 1 ? h[h.length - 2].summary[label] : null;
+  return h.length > 1 ? h[h.length - 2] : null;
 }
 
 function renderPlatforms() {
   const d = state.data;
   const n = d.packages.length;
+  const prev = previousScan();
   const rows = d.targets
     .filter((t) => t.python === state.python)
     .map((t) => {
       const s = d.summary[t.label];
       const [name] = platformName(t.platform);
-      const { bundled, ok, delta, percent, widths } = platformStats(s, previousSummary(t.label), n);
+      const { bundled, ok, delta, percent, widths } = platformStats(s, prev?.summary?.[t.label] ?? null, n, prev?.wheelgap, d.wheelgap);
       const trend = delta ? ` <small>${delta > 0 ? "+" : ""}${delta} since last scan</small>` : "";
       const seg = (k) => `<span class="b-${k}" style="width:${widths[k].toFixed(1)}%"></span>`;
       const counts = [`${fmt(s.wheel)} wheel`, ...(bundled ? [`${fmt(bundled)} bundled with Pyodide`] : []),
