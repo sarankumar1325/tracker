@@ -223,7 +223,7 @@ def json_ld(name: str, version: str, url: str, description: str) -> str:
         "@type": "SoftwareSourceCode",
         "name": name,
         "url": url,
-        "sameAs": f"https://pypi.org/project/{name}/",
+        "sameAs": f"https://pypi.org/project/{canonical(name)}/",
         "programmingLanguage": "Python",
         "description": description,
     }

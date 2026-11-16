@@ -55,7 +55,13 @@ def test_a_script_end_tag_in_the_name_cannot_end_the_block():
     assert "<" not in block and ">" not in block and "&" not in block
     data = json.loads(block)
     assert data["name"] == name
-    assert data["sameAs"] == f"https://pypi.org/project/{name}/"
+    assert data["sameAs"] == f"https://pypi.org/project/{build_pages.canonical(name)}/"
+
+
+def test_same_as_uses_the_canonical_name_like_url():
+    data = json.loads(blocks(build(scan(name="Foo_Bar.baz")))[0])
+    assert data["url"] == "https://wheelgap.github.io/tracker/p/foo-bar-baz/"
+    assert data["sameAs"] == "https://pypi.org/project/foo-bar-baz/"
 
 
 def test_no_version_leaves_the_key_out():
@@ -71,8 +77,10 @@ def test_unicode_stays_readable_and_parses():
     assert data["name"] == "café" and data["description"] == "Ünïcode — fine"
 
 
-def test_csp_has_no_script_src_to_block_a_data_block():
-    # A JSON-LD block isn't executed, so `default-src 'none'` doesn't stop crawlers reading it; and the page
-    # still runs no JavaScript.
-    assert "script-src" not in build_pages.CSP
-    assert "'none'" in build_pages.CSP
+def test_page_has_no_executable_script():
+    # The JSON-LD block is data, not script: every <script> tag on the page is one.
+    page = build(scan())
+    tags = re.findall(r"<script\b[^>]*>", page, re.I)
+    assert tags
+    assert len(tags) == page.lower().count("<script")
+    assert all(tag == '<script type="application/ld+json">' for tag in tags)
