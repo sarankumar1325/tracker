@@ -40,9 +40,9 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import traceback
 from collections.abc import Callable
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
