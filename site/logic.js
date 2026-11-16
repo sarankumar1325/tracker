@@ -33,6 +33,12 @@ function isPackageSpec(spec) {
   return !rest.length && isPackageName(name) && (version === undefined || PINNED_VERSION.test(version));
 }
 
+// The name and the pinned version (or null) of a lookup query: "numpy==2.0.0" looks up numpy.
+function splitSpec(spec) {
+  const [name, version] = String(spec).trim().split("==");
+  return [name, version === undefined ? null : version];
+}
+
 function installable(status) {
   return INSTALLABLE.has(status);
 }
@@ -140,7 +146,7 @@ function labVerdict(r) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    BUNDLED_NOTE, isPackageName, isPackageSpec, installable, gapsAt, platformStats, pyodideReleases, bundledInfo, bundledDetail, whyCommand, pyodideFooter,
+    BUNDLED_NOTE, isPackageName, isPackageSpec, splitSpec, installable, gapsAt, platformStats, pyodideReleases, bundledInfo, bundledDetail, whyCommand, pyodideFooter,
     labVerdict,
   };
 }

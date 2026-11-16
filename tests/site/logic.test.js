@@ -144,3 +144,9 @@ test("isPackageSpec takes a name or name==version, and nothing that could change
     assert.equal(logic.isPackageSpec(spec), false, JSON.stringify(spec));
   }
 });
+
+test("splitSpec looks a pinned query up by its name (#57)", () => {
+  assert.deepEqual(logic.splitSpec("numpy==2.0.0"), ["numpy", "2.0.0"]);
+  assert.deepEqual(logic.splitSpec(" numpy "), ["numpy", null]);
+  assert.deepEqual(logic.splitSpec("Django==5.1.3"), ["Django", "5.1.3"]);
+});

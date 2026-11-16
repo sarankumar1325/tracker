@@ -1,5 +1,5 @@
 "use strict";
-// Uses the helpers in logic.js (isPackageSpec, installable, platformStats, bundledDetail, ...), loaded before this file.
+// Uses the helpers in logic.js (isPackageSpec, splitSpec, installable, platformStats, bundledDetail, ...), loaded before this file.
 
 const PLATFORM_NAMES = {
   "linux-x86_64": ["Linux x86_64", "glibc · manylinux"],
@@ -227,7 +227,8 @@ function badgeMarkdown(p) {
 
 // extra is bundledInfo() of the package's data/packages/<name>.json, fetched after a first render without it.
 function renderLookup(query, extra = null) {
-  const q = canonicalName(query.trim());
+  const [base, pinned] = splitSpec(query);
+  const q = canonicalName(base);
   if (!q) {
     $("lookup").innerHTML = "";
     return;
@@ -236,11 +237,17 @@ function renderLookup(query, extra = null) {
   if (!p) {
     const name = query.trim();
     $("lookup").innerHTML = isPackageSpec(name)
-      ? `<div class="card"><p class="sub">${esc(query)} isn't in the top ${fmt(state.data.packages.length)}.
+      ? `<div class="card"><p class="sub">${esc(base.trim())} isn't in the top ${fmt(state.data.packages.length)}.
       Check it, or any package at a pinned version, locally: <code>uvx wheelgap ${esc(name)} -t all</code></p></div>`
       : `<div class="card"><p class="sub">That isn't a valid package name.</p></div>`; // don't echo arbitrary URL text
     return;
   }
+  // A pinned version the scan didn't check: say which release the card is for, and how to check the pinned one.
+  const spec = query.trim();
+  const pinNote = pinned !== null && pinned !== p.version && isPackageSpec(spec)
+    ? `<p class="sub">The scan checks the latest release, ${esc(p.version ?? "")}, not ${esc(pinned)}. Check that one locally:
+      <code>uvx wheelgap ${esc(spec)} -t all</code></p>`
+    : "";
   const pys = pythons();
   const platforms = Object.keys(PLATFORM_NAMES).filter((pl) => state.data.targets.some((t) => t.platform === pl));
   const cell = (py, pl) => {
@@ -252,7 +259,7 @@ function renderLookup(query, extra = null) {
     return `<td><span class="status s-${esc(s)}">${esc(STATUS_TEXT[s] ?? s)}</span>${small}</td>`;
   };
   $("lookup").innerHTML = `<div class="card">
-    <h3>${esc(p.name)} <span class="ver">${esc(p.version ?? "")}</span></h3>
+    <h3>${esc(p.name)} <span class="ver">${esc(p.version ?? "")}</span></h3>${pinNote}
     <p class="sub">#${esc(p.rank)} by downloads${p.pure ? " · pure Python wheel" : ""}${p.error ? ` · lookup failed: ${esc(p.error)}` : ""} ·
       <a href="p/${esc(canonicalName(p.name))}/">Package page</a> ·
       <a href="https://pypi.org/project/${encodeURIComponent(p.name)}/">PyPI</a></p>
