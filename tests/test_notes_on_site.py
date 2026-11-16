@@ -247,7 +247,10 @@ class PageNotesTests(Temp):
             "&lt;script&gt;alert(1)&lt;/script&gt; &amp; go.</p>",
             page,
         )
-        self.assertNotIn("<script", page)
+        # The only script tag is the JSON-LD data block (#100), and the note's text isn't in one.
+        self.assertEqual(page.count("<script"), 1)
+        self.assertIn('<script type="application/ld+json">', page)
+        self.assertNotIn("<script>", page)
         self.assertIn('<a href="https://example.com/docs?a=1&amp;b=2">example.com/docs?a=1&amp;b=2</a>', page)
         self.assertIn("Alternative · Alpine ARM64 · checked 2026-11-11", page)
         self.assertIn(f'content="{build_pages.CSP}"', page)

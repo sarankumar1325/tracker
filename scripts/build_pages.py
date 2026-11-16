@@ -7,7 +7,7 @@ Writes <site>/p/<name>/index.html for each package (PEP 503 canonical name) and
 robots.txt naming the sitemap. Each page shows the package's current notes from notes_dir (default: the repository's notes/) and,
 when it has a gap, an "Add a note" link. A `bundled` cell says which version Pyodide ships
 (from the committed lock files, see pyodide_locks.py). Runs at publish time; the files are not
-committed. The pages are plain HTML (no JavaScript) and reuse site/style.css, so
+committed. The pages are plain HTML (no JavaScript; one JSON-LD data block) and reuse site/style.css, so
 search engines can find "does <package> have ARM wheels".
 """
 
@@ -116,6 +116,28 @@ def describe(package: dict, columns: dict[str, int], python: str) -> str:
     if unknown := by_status.get("unknown"):
         parts.append(f"is unknown on {join_names(unknown)}")
     return "; ".join(parts) + "."
+
+
+def json_ld(name: str, version: str, url: str, description: str) -> str:
+    """A schema.org SoftwareSourceCode block for search engines.
+
+    A `type="application/ld+json"` block is data, not script, so the CSP (no script-src) doesn't apply to it.
+    json.dumps escapes for JSON; replacing `<`, `>` and `&` with their \\u escapes keeps a name like
+    `</script>` from ending the block, and the JSON still parses to the same text."""
+    data = {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": name,
+        "url": url,
+        "sameAs": f"https://pypi.org/project/{name}/",
+        "programmingLanguage": "Python",
+        "description": description,
+    }
+    if version:
+        data["version"] = version
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    text = text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return f'  <script type="application/ld+json">\n{text}\n  </script>\n'
 
 
 def note_text(text: str) -> str:
@@ -342,7 +364,7 @@ def page(
     </section>
     <p class="sub"><a href="../../#package={e(name)}">All {len(scan["packages"]):,} packages</a></p>
   </main>
-</body>
+{json_ld(name, version, url, summary)}</body>
 </html>
 """
 
