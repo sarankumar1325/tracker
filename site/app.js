@@ -1,5 +1,5 @@
 "use strict";
-// Uses the helpers in logic.js (installable, platformStats, bundledDetail, ...), loaded before this file.
+// Uses the helpers in logic.js (isPackageName, installable, platformStats, bundledDetail, ...), loaded before this file.
 
 const PLATFORM_NAMES = {
   "linux-x86_64": ["Linux x86_64", "glibc · manylinux"],
@@ -234,8 +234,11 @@ function renderLookup(query, extra = null) {
   }
   const p = state.data.packages.find((x) => canonicalName(x.name) === q);
   if (!p) {
-    $("lookup").innerHTML = `<div class="card"><p class="sub">${esc(query)} isn't in the top ${fmt(state.data.packages.length)}.
-      Check it, or any package at a pinned version, locally: <code>uvx wheelgap ${esc(query.trim())} -t all</code></p></div>`;
+    const name = query.trim();
+    $("lookup").innerHTML = isPackageName(name)
+      ? `<div class="card"><p class="sub">${esc(query)} isn't in the top ${fmt(state.data.packages.length)}.
+      Check it, or any package at a pinned version, locally: <code>uvx wheelgap ${esc(name)} -t all</code></p></div>`
+      : `<div class="card"><p class="sub">${esc(query)} isn't a valid package name.</p></div>`;
     return;
   }
   const pys = pythons();

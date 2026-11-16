@@ -15,6 +15,14 @@ const LOCK_URL = /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/v[0-9][0-9.a-z]*\/full
 const isText = (v) => typeof v === "string" && v.length > 0 && v.length < 200;
 const isCount = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
 
+// A PEP 508 distribution name. A name typed in the search box or taken from the #package= fragment ends up in the
+// lookup's copy-paste `uvx wheelgap <name>` command, so anything else must not reach it.
+const PACKAGE_NAME = /^([A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])$/i;
+
+function isPackageName(name) {
+  return typeof name === "string" && PACKAGE_NAME.test(name);
+}
+
 function installable(status) {
   return INSTALLABLE.has(status);
 }
@@ -122,7 +130,7 @@ function labVerdict(r) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    BUNDLED_NOTE, installable, gapsAt, platformStats, pyodideReleases, bundledInfo, bundledDetail, whyCommand, pyodideFooter,
+    BUNDLED_NOTE, isPackageName, installable, gapsAt, platformStats, pyodideReleases, bundledInfo, bundledDetail, whyCommand, pyodideFooter,
     labVerdict,
   };
 }
