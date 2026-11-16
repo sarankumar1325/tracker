@@ -21,8 +21,9 @@ from pathlib import Path
 from urllib.parse import quote
 
 if __package__:  # imported as scripts.build_pages (the tests)
-    from . import build_campaigns, check_notes, pyodide_locks
+    from . import build_badges, build_campaigns, check_notes, pyodide_locks
 else:  # run as python scripts/build_pages.py
+    import build_badges
     import build_campaigns
     import check_notes
     import pyodide_locks
@@ -348,11 +349,13 @@ def page(
     note_file: bool = False,
     found: dict[str, dict] | None = None,
     campaigns: list[tuple[str, dict]] | None = None,
+    tree_badge: bool = False,
 ) -> str:
     """The package's page. notes are its notes from notes/ (stale ones are left out here);
     note_file says whether notes/<name>.toml exists, so "Add a note" opens the editor instead.
     found is pyodide_locks.releases(scan): the Pyodide release behind each Python's bundled cells.
-    campaigns pairs each membership status with its loaded campaign."""
+    campaigns pairs each membership status with its loaded campaign. tree_badge says whether
+    build_badges writes badge/<name>-tree.json, so the page shows its snippet too."""
     found = found or {}
     bundled = pyodide_locks.bundled(package, scan["targets"], found)
     way_out = package.get("way_out", {})
@@ -381,6 +384,13 @@ def page(
         f"[![wheels](https://img.shields.io/endpoint?url={BASE_URL}badge/{slug}.json)]"
         f"({BASE_URL}#package={quote(name, safe='')})"
     )
+    badge_code = f"<code>{e(badge_md)}</code>"
+    if tree_badge:
+        tree_md = (
+            f"[![wheels with dependencies](https://img.shields.io/endpoint?url={BASE_URL}badge/{slug}"
+            f"{build_badges.TREE_SUFFIX}.json)]({BASE_URL}p/{slug}/)"
+        )
+        badge_code += f"\n<code>{e(tree_md)}</code>"
 
     def cell(py: str, pl: str) -> str:
         i = index.get((py, pl))
@@ -454,7 +464,7 @@ def page(
     </div>
 {install_section}{notes_section}    <section>
       <h2>Badge for your README</h2>
-      <pre class="badge-md"><code>{e(badge_md)}</code></pre>
+      <pre class="badge-md">{badge_code}</pre>
       <p class="sub"><a href="../../data/packages/{e(slug)}.json">Package JSON</a></p>
     </section>
     <p class="sub"><a href="../../#package={e(name)}">All {len(scan["packages"]):,} packages</a></p>
@@ -509,6 +519,7 @@ def build(
             for status, rows in (("todo", todo), ("set_aside", set_aside), ("done", done)):
                 for item in rows:
                     memberships.setdefault(item["canonical"], []).append((status, campaign))
+    trees = build_badges.tree_badges(scan)
     names: list[str] = []
     seen: set[str] = set()
     for p in scan["packages"]:
@@ -521,7 +532,7 @@ def build(
         out = site / "p" / name
         out.mkdir(parents=True, exist_ok=True)
         note_file = notes_dir is not None and (notes_dir / f"{name}.toml").exists()
-        text = page(p, scan, python, notes.get(name), note_file, found, memberships.get(name))
+        text = page(p, scan, python, notes.get(name), note_file, found, memberships.get(name), name in trees)
         (out / "index.html").write_text(text, encoding="utf-8")
     urls = [BASE_URL, f"{BASE_URL}check/"] + [f"{BASE_URL}p/{name}/" for name in names]
     sitemap = "".join(f"  <url><loc>{html.escape(u)}</loc></url>\n" for u in urls)

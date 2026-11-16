@@ -12,6 +12,13 @@ platforms brightgreen, at least three-quarters green, at least half yellow, any
 orange, none red. A package whose lookup failed gets a grey "unknown" badge. The
 label names the Python ("wheels py3.15"), so a badge says what it counts when the
 scan moves to a newer Python.
+
+Packages with whole-tree install data (`install`, the top 500) also get
+<out>/<name>-tree.json: the native platforms where `pip install <name>` gets every
+package in the tree as a wheel, for the newest non-free-threaded Python with install
+data ("wheels+deps py3.14"), with the same colours. A tree with any of those
+platforms not checked gets a grey "partly checked" instead of a count that looks
+complete.
 """
 
 from __future__ import annotations
@@ -70,6 +77,50 @@ def badge_for(package: dict, indexes: list[int], python: str) -> dict:
     return badge | {"message": f"{wheel}/{total} {noun}", "color": color(wheel, total)}
 
 
+TREE_SUFFIX = "-tree"
+CHECKED = ("wheel", "source", "missing")  # an install result that was checked; `not_checked` isn't
+
+
+def tree_badge_for(package: dict, targets: list[dict]) -> dict | None:
+    """The whole-tree badge, or None for a package without install data on a native target."""
+    install = package.get("install")
+    if not isinstance(install, dict) or package.get("error"):
+        return None
+    native = [
+        t for t in targets
+        if t["label"] in install and t["platform"] != "pyodide" and not str(t["python"]).endswith("t")
+    ]
+    if not native:
+        return None
+    python = max({t["python"] for t in native}, key=python_key)
+    statuses = [(install[t["label"]] or {}).get("status") for t in native if t["python"] == python]
+    badge = {"schemaVersion": 1, "label": f"wheels+deps py{python}", "cacheSeconds": CACHE_SECONDS}
+    if any(status not in CHECKED for status in statuses):
+        return badge | {"message": "partly checked", "color": "lightgrey"}
+    total = len(statuses)
+    wheel = statuses.count("wheel")
+    noun = "platform" if total == 1 else "platforms"
+    return badge | {"message": f"{wheel}/{total} {noun}", "color": color(wheel, total)}
+
+
+def tree_badges(scan: dict) -> dict[str, dict]:
+    """Canonical name -> whole-tree badge, for the packages that get one. A package whose `<name>-tree` is also
+    a package's name gets none: the two would share badge/<name>-tree.json."""
+    names = {canonical(p["name"]) for p in scan["packages"]}
+    badges: dict[str, dict] = {}
+    for p in scan["packages"]:
+        name = canonical(p["name"])
+        badge = tree_badge_for(p, scan["targets"])
+        if badge is None or not SAFE_NAME.fullmatch(name) or name in badges:
+            continue
+        if name + TREE_SUFFIX in names:
+            warning = f"no tree badge for {p['name']!r}: {name}{TREE_SUFFIX} is a package"
+            print(f"::warning::build_badges: {warning}", file=sys.stderr)
+            continue
+        badges[name] = badge
+    return badges
+
+
 def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, separators=(",", ":")) + "\n", encoding="utf-8")
 
@@ -93,6 +144,8 @@ def build(coverage_path: Path, out: Path) -> int:
             continue
         seen.add(name)
         write_json(out / f"{name}.json", badge_for(p, indexes, python))
+    for name, badge in tree_badges(scan).items():
+        write_json(out / f"{name}{TREE_SUFFIX}.json", badge)
     return len(seen)
 
 
