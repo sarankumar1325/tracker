@@ -95,11 +95,82 @@ def join_names(names: list[str]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def describe(package: dict, columns: dict[str, int], python: str) -> str:
-    """One sentence on the package's gaps for the newest Python, for the meta description."""
+DESCRIPTION_LIMIT = 160  # about what search engines show under the link
+
+
+def describe_install(package: dict, targets: list[dict], python: str) -> str | None:
+    """The whole-tree answer (#80's `install`) for Python `python`, or None without a checked target.
+
+    A `not_checked` target is left out of the count, never reported as working."""
+    by_label = {t["label"]: t for t in targets}
+    checked = []
+    for label, result in (package.get("install") or {}).items():
+        target = by_label.get(label)
+        if target is None or target["python"] != python or target["platform"] not in PLATFORM_NAMES:
+            continue
+        if result.get("status") in ("wheel", "source", "missing"):
+            checked.append((target["platform"], result))
+    if not checked:
+        return None
+    order = list(PLATFORM_NAMES)
+    checked.sort(key=lambda item: order.index(item[0]))
+    total = len(checked)
+    ok = sum(result["status"] == "wheel" for _, result in checked)
+    head = f"pip install {package['name']}"
+    if ok == total:
+        return f"{head}: wheels for the whole tree on all {total} platforms checked on Python {python}."
+    lead = f"{head}: wheels for the whole tree on {ok} of {total} platforms"
+
+    def what(result: dict, most: int | None) -> str:
+        parts = []
+        for status, verb in (("source", "builds {} from source"), ("missing", "can't install {}")):
+            names = list(dict.fromkeys(b["name"] for b in result["blockers"] if b["status"] == status))
+            if most is not None and len(names) > most:
+                names = names[:most] + [f"{len(names) - most} more"]
+            if names:
+                parts.append(verb.format(join_names(names)))
+        if not parts:  # a result without blockers; shouldn't happen, but say the status
+            parts.append("builds from source" if result["status"] == "source" else "can't install")
+        return " and ".join(parts)
+
+    for most in (None, 2, 1):
+        grouped: dict[str, list[str]] = {}
+        for platform, result in checked:
+            if result["status"] != "wheel":
+                grouped.setdefault(what(result, most), []).append(PLATFORM_NAMES[platform])
+        text = lead + "".join(f"; on {join_names(p)} it {w}" for w, p in grouped.items()) + "."
+        if len(text) <= DESCRIPTION_LIMIT:
+            return text
+    # Still too long: name the platforms only, and failing that, just the count.
+    by_status: dict[str, list[str]] = {}
+    for platform, result in checked:
+        if result["status"] != "wheel":
+            by_status.setdefault(result["status"], []).append(PLATFORM_NAMES[platform])
+    parts = [lead]
+    if source := by_status.get("source"):
+        parts.append(f"builds from source on {join_names(source)}")
+    if missing := by_status.get("missing"):
+        parts.append(f"can't install on {join_names(missing)}")
+    text = "; ".join(parts) + "."
+    if len(text) <= DESCRIPTION_LIMIT:
+        return text
+    def platforms(n: int) -> str:
+        return f"{n} platform{'s' if n != 1 else ''}"
+
+    counts = [f"builds from source on {platforms(len(source))}"] if source else []
+    counts += [f"can't install on {platforms(len(missing))}"] if missing else []
+    return f"{lead}; {' and '.join(counts)}."
+
+
+def describe(package: dict, columns: dict[str, int], python: str, targets: list[dict] | None = None) -> str:
+    """One sentence on the package's gaps for the newest Python, for the meta description.
+
+    With `install` data and targets, the whole-tree answer leads, since that's what `pip install` meets."""
     name = f"{package['name']} {package['version'] or ''}".strip()
     if package.get("error"):
         return f"{name}: the latest wheelgap scan couldn't look this package up on PyPI."
+    if targets is not None and (whole_tree := describe_install(package, targets, python)):
+        return whole_tree
     if package.get("pure"):
         return f"{name} ships a pure Python wheel."
     by_status: dict[str, list[str]] = {}
@@ -250,7 +321,7 @@ def page(
     name, version = package["name"], package["version"] or ""
     title = f"{name} wheel coverage: Linux, Alpine, macOS, Windows, ARM, Pyodide"
     url = f"{BASE_URL}p/{canonical(name)}/"
-    summary = describe(package, columns, python)
+    summary = describe(package, columns, python, targets)
     campaign_links = []
     for status, campaign in campaigns or []:
         link = f'<a href="../../campaigns/{e(campaign["id"])}/">{e(campaign["title"])}</a>'
@@ -313,6 +384,7 @@ def page(
   <meta http-equiv="Content-Security-Policy" content="{CSP}">
   <title>{e(title)}</title>
   <meta name="description" content="{e(summary)}">
+  <meta property="og:description" content="{e(summary)}">
   <link rel="canonical" href="{e(url)}">
   <link rel="stylesheet" href="../../style.css">
   <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
