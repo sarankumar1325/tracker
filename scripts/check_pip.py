@@ -24,7 +24,9 @@ The result goes to the output file: the date, the number of checks, how many mat
 target, wheelgap's answer and pip's), and the same counts for the packages without a pure-Python wheel. A cell the
 scan couldn't look up (`unknown`) isn't a check and is counted as `skipped`; one pip couldn't answer is counted as
 `errors`. If errors are more than 5% of the cells pip was asked about (as with the scan's own 5% rule), nothing is
-written and the exit code is 1, so the previous file stays. Any other failure exits 2. pip runs isolated from
+written and the exit code is 1, so the previous file stays. Errors are counted as answers come in, and once they pass
+5% of all the cells planned, no more pip runs start: the result can only fail by then, and with PyPI unreachable each
+run takes seconds, so finishing would only run into the job's timeout. Any other failure exits 2. pip runs isolated from
 pip.conf and PIP_* variables, without a cache, and writes only its small report, to a temporary folder deleted
 after each run.
 """
@@ -40,6 +42,7 @@ import sys
 import tempfile
 import traceback
 from collections.abc import Callable
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,6 +58,10 @@ MAX_ERROR_SHARE = 0.05  # scripts/check_agreement.py applies the same limit befo
 
 # (wheel filename or None, error or None) for one pip run.
 Answer = tuple[str | None, str | None]
+
+
+class _Stopped(Exception):
+    """Raised instead of running pip once too many errors make the result fail anyway."""
 
 
 class TooManyErrors(Exception):
@@ -167,8 +174,40 @@ def agreement(
     columns = [(*by_label[label], tags(by_label[label][1])) for label in labels]
     sample = sorted(scan["packages"], key=lambda p: p["rank"])[:top]
     looked_up = [p for p in sample if not p.get("error") and p.get("version")]
+    # Every cell pip will be asked about. Once errors pass 5% of these, the share at the end is over 5% too, so stop.
+    planned = sum(1 for p in looked_up for index, _, _ in columns if p["results"][index] != "unknown")
+    lock, stop = threading.Lock(), threading.Event()
+    failed: list[tuple[str, str]] = []
+    answered = 0
+
+    def guarded(name: str, args: list[str]) -> Answer:
+        nonlocal answered
+        if stop.is_set():
+            raise _Stopped
+        wheel, error = pip(name, args)
+        with lock:
+            answered += 1
+            if error:
+                failed.append((name, error))
+                if len(failed) > MAX_ERROR_SHARE * planned:
+                    stop.set()
+        return wheel, error
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        rows = [row for found in pool.map(lambda p: check_package(p, columns, pip), looked_up) for row in found]
+        futures = [pool.submit(check_package, p, columns, guarded) for p in looked_up]
+        results = []
+        for future in futures:
+            try:
+                results.append(future.result())
+            except _Stopped:
+                pass
+    if stop.is_set():
+        examples = "; ".join(f"{name}: {error}" for name, error in failed[:3])
+        raise TooManyErrors(
+            f"pip couldn't answer {len(failed)} of {answered} checks, over 5% of the {planned} planned, "
+            f"so it stopped early ({examples})"
+        )
+    rows = [row for found in results for row in found]
     checks = [r for r in rows if "pip" in r]
     errors = [r for r in rows if "error" in r]
     if len(errors) > MAX_ERROR_SHARE * (len(checks) + len(errors)):

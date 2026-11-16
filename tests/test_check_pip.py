@@ -133,8 +133,30 @@ class AgreementTests(unittest.TestCase):
         # One answer and 799 outages must not become "100% of 1 checks".
         packages = [package(rank, f"pkg{rank}", ["source"] * 3) for rank in range(1, 21)]
         wheels = {(f"pkg{rank}", "win_arm64"): None for rank in range(1, 21)}
-        with self.assertRaisesRegex(check_pip.TooManyErrors, "couldn't answer 20 of 60"):
+        with self.assertRaisesRegex(check_pip.TooManyErrors, "over 5% of the 60 planned, so it stopped early"):
             run(packages, wheels)
+
+    def test_stops_starting_pip_once_errors_pass_five_percent_of_the_plan(self):
+        # PyPI unreachable: every call fails. 4 errors are over 5% of 60 planned, so pip runs at most
+        # a worker's worth past that, not 60 times.
+        packages = [package(rank, f"pkg{rank}", ["source"] * 3) for rank in range(1, 21)]
+        tags = ("manylinux_2_36_x86_64", "win_arm64", "musllinux_1_2_aarch64")
+        wheels = {(f"pkg{rank}", tag): None for rank in range(1, 21) for tag in tags}
+        pip = FakePip(wheels)
+        with mock.patch.object(check_pip, "pip_version", return_value="26.3"):
+            message = r"couldn't answer \d+ of \d+ checks, over 5% of the 60"
+            with self.assertRaisesRegex(check_pip.TooManyErrors, message):
+                labels = [t["label"] for t in TARGETS]
+                check_pip.agreement(scan(packages), 200, labels, pip, lambda t: TAGS[t["label"]], workers=2)
+        self.assertLessEqual(len(pip.calls), 5)  # the 4th error stops it; the other worker may finish one more call
+
+    def test_errors_that_stay_under_five_percent_of_the_plan_do_not_stop_it(self):
+        # 3 of 60 planned is exactly 5%: every cell is still checked.
+        packages = [package(rank, f"pkg{rank}", ["source"] * 3) for rank in range(1, 21)]
+        wheels = {("pkg1", "win_arm64"): None, ("pkg2", "win_arm64"): None, ("pkg3", "win_arm64"): None}
+        result, pip = run(packages, wheels)
+        self.assertEqual(len(pip.calls), 60)
+        self.assertEqual(result["errors"], 3)
 
     def test_errors_up_to_five_percent_are_allowed(self):
         packages = [package(rank, f"pkg{rank}", ["source"] * 3) for rank in range(1, 21)]

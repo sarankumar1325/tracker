@@ -205,7 +205,8 @@ jobs:
   publish:
     needs: [scan, commit]
     # Not !failure(): that would also count the pip cross-check, which must never stop a publish.
-    if: ${{ !cancelled() && needs.scan.result != 'failure' && needs.commit.result != 'failure' }}
+    # The scan must have succeeded (or been skipped): a scan that timed out or was displaced ends `cancelled`.
+    if: ${{ !cancelled() && contains(fromJSON('["success","skipped"]'), needs.scan.result) && needs.commit.result != 'failure' }}
     runs-on: ubuntu-latest
     # One deploy at a time, each from the latest main, so an older run can't overwrite newer data.
     concurrency:
