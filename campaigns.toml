@@ -26,3 +26,15 @@ sources = [
     "https://cibuildwheel.pypa.io/en/stable/platforms/#windows-arm64",
 ]
 how_to = "https://github.com/wheelgap/tracker/blob/main/docs/adding-wheels-upstream.md#windows-on-arm-win_arm64"
+
+[[campaign]]
+id = "py315-linux"
+title = "Python 3.15 wheels on Linux x86_64 for the top 500"
+platform = "linux-x86_64"
+top = 500
+start = "2026-11-16"
+python = "3.15"
+# Compared with 3.14 on the same platform: on a new Python most packages have no wheel anywhere yet.
+compare = "python"
+description = "A new Python is when maintainers most need a nudge: until a package uploads wheels for it, everyone on that Python builds it from source, or can't install it at all. Linux x86_64 is where most people try a new Python first, in CI and in python:3.15 containers. This page turns the gaps among the 500 most-downloaded packages into a list people can work through, one package at a time."
+how_to = "https://github.com/wheelgap/tracker/blob/main/docs/adding-wheels-upstream.md"

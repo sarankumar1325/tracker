@@ -268,6 +268,58 @@ class CampaignTests(unittest.TestCase):
         self.assertIn("(2 of 4)", page)
         self.assertIn("NumPy", self.todo(page))
 
+    def test_new_python_campaign_compares_with_the_python_before(self):
+        # compare = "python": a gap is a 3.15 musl-aarch64 wheel missing where 3.13 (the newest older
+        # non-free-threaded Python; 3.14t doesn't count) has one. newpy is that; psycopg2 has neither, so it's
+        # left out, the reverse of the default campaign.
+        self.config.write_text(CONFIG + 'python = "3.15"\ncompare = "python"\n', encoding="utf-8")
+        page = self.built_page()
+        todo = self.todo(page)
+        self.assertIn("newpy", todo)
+        self.assertNotIn("psycopg2", todo)
+        self.assertIn("1 of the top 5 packages have an Alpine ARM64 wheel for Python 3.13 but not for 3.15", page)
+        left_out = page.split("Left out:", 1)[1].split("</p>", 1)[0]
+        self.assertIn("1 package has no Alpine ARM64 wheel for Python 3.13 or 3.15 (psycopg2)", left_out)
+
+    def test_previous_python_is_on_the_campaigns_platform(self):
+        # An older Python elsewhere doesn't count: with none on the platform, a new-Python campaign refuses to build.
+        targets = [
+            {"label": "3.13 macos-arm64", "python": "3.13", "platform": "macos-arm64"},
+            {"label": "3.15 linux-x86_64", "python": "3.15", "platform": "linux-x86_64"},
+        ]
+        self.assertIsNone(build_campaigns.previous_python(targets, "3.15", "linux-x86_64"))
+        self.assertEqual(build_campaigns.previous_python(targets, "3.15"), "3.13")
+        with self.assertRaises(SystemExit):
+            build_campaigns.compare_indexes(targets, "3.15", "linux-x86_64", "python")
+
+    def test_previous_python_skips_free_threaded_and_newer(self):
+        targets = self.scan["targets"] + [{"label": "3.16 linux-x86_64", "python": "3.16", "platform": "linux-x86_64"}]
+        self.assertEqual(build_campaigns.previous_python(targets, "3.15"), "3.13")
+        self.assertEqual(build_campaigns.previous_python(targets, "3.16"), "3.15")
+        self.assertIsNone(build_campaigns.previous_python(targets, "3.13"))
+
+    def test_new_python_campaign_baseline_and_todo_lists(self):
+        self.recordable('python = "3.15"\ncompare = "python"\n')
+        self.assertEqual(self.record(), ["musl-aarch64"])
+        baseline = json.loads((self.root / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+        # NumPy gained the wheel after the start but had no 3.13 musl-aarch64 wheel either, so it wasn't to do.
+        self.assertEqual([p["name"] for p in baseline["packages"]], ["newpy"])
+        scan = json.loads(self.coverage.read_text(encoding="utf-8"))
+        campaign = build_campaigns.load_campaigns(self.config)[0]
+        todo, _ = build_campaigns.todo_lists(
+            build_campaigns.top_packages(scan, 4), scan, "3.15", "musl-aarch64", None, campaign["compare"]
+        )
+        self.assertEqual([item["name"] for item in todo], ["newpy"])
+
+    def test_bad_compare_is_rejected(self):
+        for extra, message in (('compare = "os"\n', "compare must be one of"),
+                               ('compare = "python"\n', "needs a python")):
+            with self.subTest(extra=extra):
+                self.config.write_text(CONFIG + extra, encoding="utf-8")
+                self.write_inputs()
+                with self.assertRaisesRegex(SystemExit, message):
+                    build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
+
     def test_bad_campaign_values_are_rejected(self):
         for line in ('python = "3.14t"', "python = 3.14", 'start = "2026-13-45"', "top = true",
                      'how_to = "http://example.com"', "description = 1"):

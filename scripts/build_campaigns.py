@@ -55,6 +55,10 @@ NOTES_DIR = Path(__file__).resolve().parent.parent / "notes"
 # "alternative" says that: a different package or extra has it. None of the kinds records that upstream
 # declined; "upstream-issue" is a ticket to follow, so those rows stay in To do with the marker.
 SET_ASIDE_KINDS = ("alternative",)
+# What a to-do package has that the campaign's target lacks: by default ("platform") a wheel for the campaign's
+# Python on another platform of the same OS; for a new-Python campaign ("python"), a wheel on the campaign's
+# platform for the Python before it, since on a new Python most packages have no wheel anywhere yet.
+COMPARE = ("platform", "python")
 PLATFORM_NAMES = {
     "linux-x86_64": "Linux x86_64",
     "linux-aarch64": "Linux ARM64",
@@ -142,6 +146,10 @@ def load_campaigns(config_path: Path) -> list[dict]:
         python = campaign.get("python")
         if python is not None and not (isinstance(python, str) and re.fullmatch(r"3\.\d+", python)):
             sys.exit(f"build_campaigns: campaign {ident!r} python must be like \"3.14\" (not free-threaded)")
+        if campaign.setdefault("compare", "platform") not in COMPARE:
+            sys.exit(f"build_campaigns: campaign {ident!r} compare must be one of {', '.join(map(repr, COMPARE))}")
+        if campaign["compare"] == "python" and python is None:
+            sys.exit(f"build_campaigns: campaign {ident!r} compare = \"python\" needs a python")
         for field in ("title", "platform", "description", "how_to"):
             if field in campaign and not isinstance(campaign[field], str):
                 sys.exit(f"build_campaigns: campaign {ident!r} {field} must be a string")
@@ -198,6 +206,33 @@ def native_indexes(targets: list[dict], python: str, platform: str) -> list[int]
     return [
         i for i, t in enumerate(targets) if t["python"] == python and os_of(t["platform"]) == os_of(platform)
     ]
+
+
+def previous_python(targets: list[dict], python: str, platform: str | None = None) -> str | None:
+    """The newest non-free-threaded Python in the scan older than `python` (with a target on `platform`, if given),
+    or None."""
+    older = {
+        t["python"] for t in targets
+        if not str(t["python"]).endswith("t") and python_key(t["python"]) < python_key(python)
+        and (platform is None or t["platform"] == platform)
+    }
+    return max(older, key=python_key) if older else None
+
+
+def compare_indexes(targets: list[dict], python: str, platform: str, compare: str = "platform") -> list[int]:
+    """The targets a to-do package needs a wheel on (besides the campaign's own) to be on the list.
+
+    "platform": native_indexes. "python": the campaign's target and the same platform on the Python before it.
+    A package with no wheel on any of them is left out, not asked about.
+    """
+    if compare != "python":
+        return native_indexes(targets, python, platform)
+    previous = previous_python(targets, python, platform)
+    if previous is None:
+        # Nothing to compare with: the to-do list would always be empty and the page would say so. Refuse instead.
+        sys.exit(f"build_campaigns: compare = \"python\" needs an older Python than {python} on {platform} in the scan")
+    pythons = {python, previous}
+    return [i for i, t in enumerate(targets) if t["platform"] == platform and t["python"] in pythons]
 
 
 def not_started(package: dict, indexes: list[int]) -> bool:
@@ -300,15 +335,15 @@ def baseline_for(campaign: dict, scan: dict, changes: list[dict], python: str) -
     """The campaign's starting to-do list, from this scan and the change log.
 
     It is today's to-do list, plus packages in the top N that gained a wheel on the target after the
-    campaign's start and were on the to-do list then: no wheel on the target, and a wheel for the
-    campaign's Python on another platform of the same OS (so not "left out"), going by the change log.
+    campaign's start and were on the to-do list then: no wheel on the target, and a wheel on one of
+    compare_indexes' other targets (so not "left out"), going by the change log.
     A baseline recorded after its start is a reconstruction; "recorded" says when it was made.
     """
     platform = campaign["platform"]
     targets = scan["targets"]
     index = target_index(targets, python, platform)
     label = targets[index]["label"]
-    indexes = native_indexes(targets, python, platform)
+    indexes = compare_indexes(targets, python, platform, campaign.get("compare", "platform"))
     packages = top_packages(scan, campaign["top"])
     rows = {
         canonical(item["name"]): {"name": item["name"], "rank": item["rank"], "status": item["status"]}
@@ -538,11 +573,16 @@ def trend_html(rows: list[dict], label: str, start: str) -> str:
 
 
 def todo_lists(
-    packages: list[dict], scan: dict, python: str, platform: str, notes: dict[str, list[dict]] | None = None
+    packages: list[dict],
+    scan: dict,
+    python: str,
+    platform: str,
+    notes: dict[str, list[dict]] | None = None,
+    compare: str = "platform",
 ) -> tuple[list[dict], list[dict]]:
     """The campaign's to-do and set-aside rows, including current notes and source links."""
     index = target_index(scan["targets"], python, platform)
-    indexes = native_indexes(scan["targets"], python, platform)
+    indexes = compare_indexes(scan["targets"], python, platform, compare)
     todo = todo_list(packages, index, indexes)
     include_source = any(source_url(p) for p in scan["packages"])
     if include_source:
@@ -583,8 +623,10 @@ def page(
     index = target_index(scan["targets"], python, platform)
     label = scan["targets"][index]["label"]
     packages = top_packages(scan, top)
-    indexes = native_indexes(scan["targets"], python, platform)
+    compare = campaign.get("compare", "platform")
+    indexes = compare_indexes(scan["targets"], python, platform, compare)
     os_name = OS_NAMES.get(os_of(platform), os_of(platform))
+    platform_name = PLATFORM_NAMES.get(platform, platform)
     wheels, total = coverage_counts(packages, index)
     share = percent(wheels, total)
     compiled = [p for p in packages if not p.get("pure")]
@@ -592,13 +634,12 @@ def page(
     errors = [p for p in packages if p.get("error")]
     waiting = [p for p in packages if not_started(p, indexes)]
     include_source = any(source_url(p) for p in scan["packages"])
-    todo, set_aside = todo_lists(packages, scan, python, platform, notes)
+    todo, set_aside = todo_lists(packages, scan, python, platform, notes, compare)
     recorded = baseline is not None
     if baseline is None:
         baseline = baseline_for(campaign, scan, changes, python)
     mismatch = baseline_mismatch(baseline, campaign, label) if recorded else []
     done = [] if mismatch else done_list(baseline, scan["packages"], index, label, changes)
-    platform_name = PLATFORM_NAMES.get(platform, platform)
     title = campaign["title"]
     url = f"{BASE_URL}campaigns/{campaign['id']}/"
     summary = (
@@ -610,8 +651,18 @@ def page(
         "people can work through, one package at a time."
     )
     checked_note = f" {len(errors)} couldn't be looked up in this scan and aren't counted." if errors else ""
+    previous = previous_python(scan["targets"], python, platform) if compare == "python" else None
     waiting_html = ""
-    if waiting:
+    if waiting and compare == "python":
+        names = ", ".join(e(p["name"]) for p in waiting)
+        before = f"Python {e(previous)} or {e(python)}" if previous else f"Python {e(python)}"
+        waiting_html = (
+            f'      <p class="note">Left out: {len(waiting)} {"package has" if len(waiting) == 1 else "packages have"} '
+            f"no {e(platform_name)} wheel for {before} ({names}). Without a wheel on the Python before, a missing "
+            f"Python {e(python)} wheel isn't a new-Python gap (an sdist-only release, or no {e(platform_name)} "
+            "wheels by design), so this campaign doesn't ask about it.</p>\n"
+        )
+    elif waiting:
         names = ", ".join(e(p["name"]) for p in waiting)
         waiting_html = (
             f'      <p class="note">Left out: {len(waiting)} {"package has" if len(waiting) == 1 else "packages have"} '
@@ -636,6 +687,11 @@ def page(
             f"{rows_html(set_aside, kind='todo', include_source=include_source)}"
             "    </section>\n"
         )
+    todo_why = (
+        f"have {article(platform_name)} {platform_name} wheel for Python {previous} but not for {python}"
+        if previous
+        else f"have Python {python} wheels for other platforms but not {platform_name}"
+    )
     sources_html = ""
     if campaign.get("sources"):
         links = " · ".join(f'<a href="{e(u)}">{e(u.removeprefix("https://"))}</a>' for u in campaign["sources"])
@@ -701,6 +757,7 @@ def page(
         "python": python,
         "top": top,
         "start": campaign["start"],
+        "compare": campaign.get("compare", "platform"),
         "share": round(100.0 * wheels / total, 1) if total else None,
         "wheels": wheels,
         "total": total,
@@ -758,7 +815,7 @@ def page(
 {trend_html(trend(history, label, campaign["start"]), label, campaign["start"])}    </section>
     <section>
       <h2>To do</h2>
-      <p class="note">{len(todo)} of the top {top} packages have Python {e(python)} wheels for other platforms but not {e(platform_name)}, most-downloaded first{set_aside_count}.{read_notes} {e(ASK_FIRST)}{how_to_html}</p>
+      <p class="note">{len(todo)} of the top {top} packages {e(todo_why)}, most-downloaded first{set_aside_count}.{read_notes} {e(ASK_FIRST)}{how_to_html}</p>
 {rows_html(todo, kind="todo", include_source=include_source, empty=todo_empty)}{waiting_html}    </section>
 {set_aside_html}    <section>
       <h2>Done</h2>
@@ -842,7 +899,7 @@ def index_page(listings: list[dict], generated: str, wheelgap: str) -> str:
   <main class="wrap">
     <section>
       <h2>All campaigns</h2>
-      <p class="note">Coverage is the share of each campaign's top packages with a wheel for its platform and Python. To do counts the packages that have wheels for that Python on other platforms but not this one. As JSON: <a href="../data/campaigns.json">data/campaigns.json</a>.</p>
+      <p class="note">Coverage is the share of each campaign's top packages with a wheel for its platform and Python. To do counts the packages that have wheels for that Python on other platforms but not this one, or, for a new-Python campaign, a wheel on that platform for the Python before it but not for the new one. As JSON: <a href="../data/campaigns.json">data/campaigns.json</a>.</p>
         <div class="matrix-scroll"><table class="matrix">
           <thead><tr><th>Campaign</th><th>Platform</th><th>Python</th><th>Coverage</th><th>To do</th></tr></thead>
           <tbody>

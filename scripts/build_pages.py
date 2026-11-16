@@ -374,7 +374,12 @@ def build(
             index = build_campaigns.target_index(scan["targets"], campaign_python, platform)
             label = scan["targets"][index]["label"]
             todo, set_aside = build_campaigns.todo_lists(
-                build_campaigns.top_packages(scan, campaign["top"]), scan, campaign_python, platform, notes
+                build_campaigns.top_packages(scan, campaign["top"]),
+                scan,
+                campaign_python,
+                platform,
+                notes,
+                campaign.get("compare", "platform"),
             )
             baseline = build_campaigns.load_baseline(
                 coverage_path.parent / "campaigns" / f"{campaign['id']}.json"
