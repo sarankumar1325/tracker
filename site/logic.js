@@ -23,6 +23,16 @@ function isPackageName(name) {
   return typeof name === "string" && PACKAGE_NAME.test(name);
 }
 
+// A package name, optionally pinned as name==version (the lookup card invites a pinned version). The version allows
+// only letters, digits and . + _ - so it can't change the command either.
+const PINNED_VERSION = /^[A-Z0-9][A-Z0-9.+_-]*$/i;
+
+function isPackageSpec(spec) {
+  if (typeof spec !== "string") return false;
+  const [name, version, ...rest] = spec.split("==");
+  return !rest.length && isPackageName(name) && (version === undefined || PINNED_VERSION.test(version));
+}
+
 function installable(status) {
   return INSTALLABLE.has(status);
 }
@@ -130,7 +140,7 @@ function labVerdict(r) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    BUNDLED_NOTE, isPackageName, installable, gapsAt, platformStats, pyodideReleases, bundledInfo, bundledDetail, whyCommand, pyodideFooter,
+    BUNDLED_NOTE, isPackageName, isPackageSpec, installable, gapsAt, platformStats, pyodideReleases, bundledInfo, bundledDetail, whyCommand, pyodideFooter,
     labVerdict,
   };
 }

