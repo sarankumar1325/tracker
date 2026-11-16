@@ -6,6 +6,8 @@
 Writes <site>/campaigns/<id>/index.html for each campaign in the TOML file, an
 index of them at <site>/campaigns/index.html, and adds those URLs to
 <site>/sitemap.xml (created by build_pages.py, or written here if it is missing).
+The same numbers and lists go to <site>/data/campaigns/<id>.json, with an index
+of them at <site>/data/campaigns.json, for scripts that follow a campaign.
 Runs at publish time; the pages are not committed. The pages are plain HTML
 (no JavaScript) and reuse site/style.css.
 
@@ -43,6 +45,7 @@ else:  # run as python scripts/build_campaigns.py
 
 SCAN_SCHEMA = 1
 BASELINE_SCHEMA = 1
+STATUS_SCHEMA = 1
 SAFE_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 SAFE_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 BASE_URL = "https://wheelgap.github.io/tracker/"
@@ -686,6 +689,36 @@ def page(
                 "needn't add up to it."
             )
     generated = str(scan["generated"])[:10]
+    status = {
+        "schema": STATUS_SCHEMA,
+        "generated": str(scan["generated"]),
+        "wheelgap": str(scan["wheelgap"]),
+        "campaign": campaign["id"],
+        "title": title,
+        "url": url,
+        "target": label,
+        "platform": platform,
+        "python": python,
+        "top": top,
+        "start": campaign["start"],
+        "share": round(100.0 * wheels / total, 1) if total else None,
+        "wheels": wheels,
+        "total": total,
+        "todo": [status_row(item) for item in todo],
+        "has_alternative": [status_row(item) for item in set_aside],
+        # None when the recorded starting list is for other settings: progress can't be told.
+        "done": None if mismatch else [
+            {"name": r["name"], "version": r["version"], "date": r["date"], "was": r["frm"]} for r in done
+        ],
+        "baseline": {
+            # None while the starting list isn't recorded yet: it's then today's to-do list plus later gains.
+            "recorded": baseline["recorded"] if recorded else None,
+            "mismatch": mismatch,
+            "packages": [
+                {"name": p["name"], "rank": p.get("rank"), "status": p.get("status")} for p in baseline["packages"]
+            ],
+        },
+    }
     listing = {
         "id": campaign["id"],
         "title": title,
@@ -696,6 +729,7 @@ def page(
         "wheels": wheels,
         "total": total,
         "todo": len(todo),
+        "status": status,
     }
     return f"""<!doctype html>
 <html lang="en">
@@ -714,7 +748,7 @@ def page(
     <p class="eyebrow"><a href="../../">wheelgap tracker</a> · <a href="../">Campaigns</a></p>
     <h1>{e(title)}</h1>
     <p class="lede">{e(lede)}</p>
-{sources_html}    <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(generated)}, using Python {e(python)}{python_why}.</p>
+{sources_html}    <p class="meta">From the wheelgap {e(str(scan["wheelgap"]))} scan of {e(generated)}, using Python {e(python)}{python_why}. As JSON: <a href="../../data/campaigns/{e(campaign['id'])}.json">data/campaigns/{e(campaign['id'])}.json</a>.</p>
   </header>
   <main class="wrap">
     <section>
@@ -734,6 +768,43 @@ def page(
 </body>
 </html>
 """, listing
+
+
+def status_row(item: dict) -> dict:
+    """A to-do or set-aside row for the status file: what the page's table shows, plus the note's URL."""
+    row = {"rank": item["rank"], "name": item["name"], "version": item["version"], "status": item["status"]}
+    if item.get("note"):
+        row["note"] = item["note"]
+    return row
+
+
+def status_index(listings: list[dict], generated: str, wheelgap: str) -> dict:
+    """data/campaigns.json: every campaign's headline numbers and where its status file is."""
+    return {
+        "schema": STATUS_SCHEMA,
+        "generated": generated,
+        "wheelgap": wheelgap,
+        "campaigns": [
+            {
+                "id": c["id"],
+                "title": c["title"],
+                "platform": c["platform"],
+                "python": c["python"],
+                "share": c["status"]["share"],
+                "wheels": c["wheels"],
+                "total": c["total"],
+                "todo": c["todo"],
+                "url": c["status"]["url"],
+                "data": f"{BASE_URL}data/campaigns/{c['id']}.json",
+            }
+            for c in listings
+        ],
+    }
+
+
+def write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def index_page(listings: list[dict], generated: str, wheelgap: str) -> str:
@@ -771,7 +842,7 @@ def index_page(listings: list[dict], generated: str, wheelgap: str) -> str:
   <main class="wrap">
     <section>
       <h2>All campaigns</h2>
-      <p class="note">Coverage is the share of each campaign's top packages with a wheel for its platform and Python. To do counts the packages that have wheels for that Python on other platforms but not this one.</p>
+      <p class="note">Coverage is the share of each campaign's top packages with a wheel for its platform and Python. To do counts the packages that have wheels for that Python on other platforms but not this one. As JSON: <a href="../data/campaigns.json">data/campaigns.json</a>.</p>
         <div class="matrix-scroll"><table class="matrix">
           <thead><tr><th>Campaign</th><th>Platform</th><th>Python</th><th>Coverage</th><th>To do</th></tr></thead>
           <tbody>
@@ -878,11 +949,15 @@ def build(
         baseline = load_baseline(baselines / f"{ident}.json")
         text, listing = page(campaign, scan, history, changes, python, baseline, notes)
         (out / "index.html").write_text(text, encoding="utf-8")
+        write_json(site / "data" / "campaigns" / f"{ident}.json", listing["status"])
         listings.append(listing)
         urls.append(f"{BASE_URL}campaigns/{ident}/")
     generated = str(scan["generated"])[:10]
     (site / "campaigns" / "index.html").write_text(
         index_page(listings, generated, str(scan["wheelgap"])), encoding="utf-8"
+    )
+    write_json(
+        site / "data" / "campaigns.json", status_index(listings, str(scan["generated"]), str(scan["wheelgap"]))
     )
     add_to_sitemap(site, urls)
     return len(campaigns)
