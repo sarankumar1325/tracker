@@ -331,6 +331,47 @@ class CheckNotesTests(unittest.TestCase):
         notes = check_notes.load(self.notes, coverage(PYTHON_TARGETS), warn=lambda message: None)
         self.assertEqual(notes, {})
 
+    def test_load_keeps_the_other_notes_when_one_names_a_dropped_python(self):
+        # The scan has stopped covering 3.12: the file's note without python still reaches the site.
+        self.write(
+            "psycopg2.toml",
+            note_toml(python='["3.12"]', text="Old workaround.") + "\n" + note_toml(text="Use the binary extra."),
+        )
+        warnings = []
+        notes = check_notes.load(self.notes, coverage(PYTHON_TARGETS), warn=warnings.append)
+        self.assertEqual([n["text"] for n in notes["psycopg2"]], ["Use the binary extra."])
+        self.assertEqual(warnings, ["retiring psycopg2.toml note 1: python 3.12 is no longer scanned"])
+
+    def test_load_leaves_out_a_file_whose_only_note_names_a_dropped_python(self):
+        self.write("psycopg2.toml", note_toml(python='["3.12"]'))
+        warnings = []
+        self.assertEqual(check_notes.load(self.notes, coverage(PYTHON_TARGETS), warn=warnings.append), {})
+        self.assertEqual(warnings, ["retiring psycopg2.toml note 1: python 3.12 is no longer scanned"])
+
+    def test_load_drops_a_dropped_python_from_a_note_that_still_has_a_scanned_one(self):
+        self.write("psycopg2.toml", note_toml(python='["3.12", "3.13"]'))
+        warnings = []
+        notes = check_notes.load(self.notes, coverage(PYTHON_TARGETS), warn=warnings.append)
+        self.assertEqual(notes["psycopg2"][0]["python"], ["3.13"])
+        self.assertEqual(warnings, [])
+
+    def test_problems_still_reports_a_dropped_python(self):
+        self.write("psycopg2.toml", note_toml(python='["3.12", "3.13"]'))
+        found = self.problems(coverage(PYTHON_TARGETS))
+        self.assertEqual(
+            found,
+            [
+                (
+                    "psycopg2.toml note 1: unknown python '3.12': the scan covers 3.13, 3.14t; "
+                    "if it no longer covers this Python, remove it from python"
+                )
+            ],
+        )
+
+    def test_load_still_skips_a_file_with_a_malformed_python(self):
+        self.write("psycopg2.toml", note_toml(python="[3.13]") + "\n" + note_toml())
+        self.assertEqual(check_notes.load(self.notes, coverage(PYTHON_TARGETS), warn=lambda message: None), {})
+
     def test_python_one_listed_platform_has_is_accepted(self):
         for platforms in ('["pyodide", "musl-aarch64"]', '["all"]'):
             with self.subTest(platforms=platforms):

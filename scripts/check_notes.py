@@ -96,6 +96,10 @@ def load(notes_dir: Path, coverage: dict, warn=None) -> dict[str, list[dict]]:
 
     A file with any problem is left out whole, and each problem is passed to warn (a GitHub
     Actions warning on stderr by default), so a bad note never reaches the site.
+
+    The scanned Pythons change every year, so a Python the scan no longer covers is not a problem
+    here: a note whose `python` labels are all unscanned is retired (left out, with a warning), and
+    unscanned labels on a note that still has a scanned one are dropped. problems() stays strict.
     """
     if warn is None:
         def warn(message: str) -> None:
@@ -116,10 +120,13 @@ def load(notes_dir: Path, coverage: dict, warn=None) -> dict[str, list[dict]]:
         if not path.is_file():
             warn(f"skipping {path.name}: not a file (only notes/<name>.toml belong here)")
             continue
-        notes, found = _read_file(path, notes_dir, allowed, pythons, pairs)
+        retired: list[str] = []
+        notes, found = _read_file(path, notes_dir, allowed, pythons, pairs, retired=retired)
+        for message in retired:
+            warn(message)
         for problem in found:
             warn(f"skipping {path.name}: {problem}")
-        if not found:
+        if not found and notes:
             out[path.stem] = notes
     return out
 
@@ -130,8 +137,13 @@ def _read_file(
     allowed: set[str],
     pythons: set[str] = frozenset(),
     pairs: set[tuple[str, str]] | None = None,
+    retired: list[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
-    """The file's notes and its problems; the notes are only usable when there are no problems."""
+    """The file's notes and its problems; the notes are only usable when there are no problems.
+
+    With a `retired` list (load(), for the site), Pythons the scan no longer covers are not problems:
+    see _retire_unscanned. Each note it leaves out is described in `retired`.
+    """
     rel = (
         path.relative_to(notes_dir).as_posix()
         if path.is_relative_to(notes_dir)
@@ -162,13 +174,38 @@ def _read_file(
         out.append(f"{rel}: needs at least one [[note]]")
         return [], out
 
+    kept: list[dict] = []
     for i, note in enumerate(notes, start=1):
         prefix = f"{rel} note {i}"
         if not isinstance(note, dict):
             out.append(f"{prefix}: expected a table")
             continue
+        if retired is not None:
+            note = _retire_unscanned(prefix, note, pythons, retired)
+            if note is None:
+                continue
         out.extend(_note_problems(prefix, note, allowed, pythons, pairs))
-    return notes, out
+        kept.append(note)
+    return (kept if retired is not None else notes), out
+
+
+def _retire_unscanned(prefix: str, note: dict, pythons: set[str], retired: list[str]) -> dict | None:
+    """The note without the Python labels the scan no longer covers, or None when none is left.
+
+    Only a well-formed `python` list (non-empty, all strings) is touched; anything else is left for
+    _note_problems to report.
+    """
+    listed = note.get("python")
+    if not isinstance(listed, list) or not listed or not all(isinstance(p, str) for p in listed):
+        return note
+    scanned = [p for p in listed if p in pythons]
+    dropped = [p for p in listed if p not in pythons]
+    if not dropped:
+        return note
+    if not scanned:
+        retired.append(f"retiring {prefix}: python {', '.join(dropped)} is no longer scanned")
+        return None
+    return {**note, "python": scanned}
 
 
 def _release(text: str) -> tuple[int, ...]:
@@ -329,7 +366,11 @@ def _note_problems(
         if not isinstance(listed, list) or not listed:
             out.append(f"{prefix}: python must be a non-empty list")
         elif bad := [p for p in listed if not isinstance(p, str) or p not in pythons]:
-            out.append(f"{prefix}: unknown python {bad[0]!r}")
+            scanned = ", ".join(sorted(pythons)) or "none"
+            out.append(
+                f"{prefix}: unknown python {bad[0]!r}: the scan covers {scanned}; "
+                "if it no longer covers this Python, remove it from python"
+            )
         elif dupes := _duplicates(listed):
             out.append(f"{prefix}: duplicate python: {', '.join(dupes)}")
         # Every label is scanned somewhere, but a note must also have a target to retire by: pyodide, say,

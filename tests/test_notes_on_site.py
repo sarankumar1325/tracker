@@ -139,7 +139,8 @@ class LoadTests(Temp):
         self.assertEqual(list(loaded), ["good"])
         self.assertEqual(len(warnings), 1)
         self.assertIn("bad.toml", warnings[0])
-        self.assertIn("unknown python '3.12'", warnings[0])
+        # A Python the scan no longer covers retires the note, not the whole file (#55).
+        self.assertIn("python 3.12 is no longer scanned", warnings[0])
 
     def test_missing_directory_has_no_notes(self):
         self.assertEqual(check_notes.load(self.root / "nowhere", scan([])), {})
