@@ -369,6 +369,8 @@ def baseline_for(campaign: dict, scan: dict, changes: list[dict], python: str) -
         "start": start,
         "recorded": str(scan["generated"])[:10],
         "wheelgap": str(scan["wheelgap"]),
+        # The rule the list was built by, so a later change of compare shows as a mismatch (#103).
+        "compare": campaign.get("compare", "platform"),
         "packages": sorted(rows.values(), key=lambda r: r["rank"]),
     }
 
@@ -405,6 +407,10 @@ def load_baseline(path: Path) -> dict | None:
             sys.exit(f"build_campaigns: {path} is missing {field!r}")
     if not isinstance(data.get("top"), int) or isinstance(data.get("top"), bool):
         sys.exit(f"build_campaigns: {path} is missing 'top'")
+    # Baselines recorded before #103 have no compare. They were built by whatever rule their campaign had then (the
+    # 3.15 one by "python"), so a missing compare isn't checked, rather than guessed.
+    if "compare" in data and data["compare"] not in COMPARE:
+        sys.exit(f"build_campaigns: {path} compare must be one of {', '.join(map(repr, COMPARE))}")
     # A hand edit can repeat a package; count it once.
     seen: set[str] = set()
     data["packages"] = [
@@ -415,7 +421,15 @@ def load_baseline(path: Path) -> dict | None:
 
 def baseline_mismatch(baseline: dict, campaign: dict, label: str) -> list[str]:
     """The settings a recorded baseline doesn't share with campaigns.toml, as "field: baseline value"."""
-    expected = {"campaign": campaign["id"], "top": campaign["top"], "start": campaign["start"], "target": label}
+    expected = {
+        "campaign": campaign["id"],
+        "top": campaign["top"],
+        "start": campaign["start"],
+        "target": label,
+        "compare": campaign.get("compare", "platform"),
+    }
+    if "compare" not in baseline:  # recorded before #103: built by the campaign's own rule at the time, not checked
+        del expected["compare"]
     return [f"{field} {baseline.get(field)}" for field, value in expected.items() if baseline.get(field) != value]
 
 

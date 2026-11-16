@@ -64,3 +64,42 @@ def test_package_campaigns_and_badge(tmp_path):
     unsafe = dict(scan["packages"][0], name='<pkg&"')
     page = build_pages.page(unsafe, scan, "3.14")
     assert html.escape(unsafe["name"]) in page and unsafe["name"] not in page
+
+
+def test_package_page_follows_a_new_python_campaign(tmp_path):
+    """#103: build_pages passes compare to todo_lists, so a package page agrees with its new-Python campaign."""
+    data = tmp_path / "data"
+    data.mkdir()
+    targets = [
+        {"label": f"{py} {pl}", "python": py, "platform": pl}
+        for py in ("3.14", "3.15")
+        for pl in ("linux-x86_64", "musl-aarch64")
+    ]
+
+    def pkg(name, rank, results):
+        return dict(name=name, rank=rank, results=results, version="1.0", pure=False, error=None)
+
+    scan = dict(schema=1, generated="2026-11-17", wheelgap="0.9", targets=targets, packages=[
+        # A 3.14 linux-x86_64 wheel but none for 3.15 yet: to do for the new-Python campaign. Under the
+        # platform rule it would be left out (no 3.15 wheel on any Linux platform).
+        pkg("waiting", 1, ["wheel", "wheel", "source", "source"]),
+        # No linux-x86_64 wheel for 3.14 either: not a new-Python gap. Under the platform rule it would be
+        # to do (a 3.15 musl-aarch64 wheel).
+        pkg("never", 2, ["source", "wheel", "source", "wheel"]),
+        pkg("ready", 3, ["wheel"] * 4),
+    ])
+    coverage = data / "coverage.json"
+    coverage.write_text(json.dumps(scan))
+    (tmp_path / "campaigns.toml").write_text(
+        '[[campaign]]\nid="py315"\ntitle="Python 3.15"\nplatform="linux-x86_64"\ntop=3\n'
+        'start="2026-11-17"\npython="3.15"\ncompare="python"\n'
+    )
+    site = tmp_path / "_site"
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    assert build_pages.build(coverage, site, notes, root=tmp_path) == 3
+    pages = {p: (site / "p" / p / "index.html").read_text() for p in ("waiting", "never", "ready")}
+    link = '<a href="../../campaigns/py315/">Python 3.15</a>'
+    assert "On the to-do list of " + link in pages["waiting"]
+    assert "Campaigns:" not in pages["never"]
+    assert "Campaigns:" not in pages["ready"]

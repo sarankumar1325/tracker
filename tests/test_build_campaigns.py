@@ -1,5 +1,6 @@
 """Offline checks for the campaign pages and their index."""
 
+import re
 import json
 import subprocess
 import sys
@@ -310,6 +311,46 @@ class CampaignTests(unittest.TestCase):
             build_campaigns.top_packages(scan, 4), scan, "3.15", "musl-aarch64", None, campaign["compare"]
         )
         self.assertEqual([item["name"] for item in todo], ["newpy"])
+
+    def test_recorded_baseline_keeps_its_compare(self):
+        # #103: the rule a starting list was built by is recorded with it.
+        self.recordable('python = "3.15"\ncompare = "python"\n')
+        self.assertEqual(self.record(), ["musl-aarch64"])
+        baseline = json.loads((self.root / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+        self.assertEqual(baseline["compare"], "python")
+        self.recordable()
+        (self.root / "campaigns" / "musl-aarch64.json").unlink()
+        self.assertEqual(self.record(), ["musl-aarch64"])
+        baseline = json.loads((self.root / "campaigns" / "musl-aarch64.json").read_text(encoding="utf-8"))
+        self.assertEqual(baseline["compare"], "platform")
+
+    def test_baseline_for_another_compare_shows_no_count(self):
+        # Recorded by the platform rule, read by a new-Python campaign: Done would count against the wrong list.
+        self.config.write_text(CONFIG + 'python = "3.15"\ncompare = "python"\n', encoding="utf-8")
+        self.write_baseline(compare="platform")
+        done = self.done(self.built_page())
+        self.assertIn("was recorded for other settings (compare platform)", done)
+        self.assertNotIn("<strong>", done)
+
+    def test_baseline_from_before_compare_isnt_checked_on_it(self):
+        # The 3.15 campaign's list may be recorded before #103 lands, by the python rule but with no compare field:
+        # that must not show as a mismatch.
+        self.config.write_text(CONFIG + 'python = "3.15"\ncompare = "python"\n', encoding="utf-8")
+        self.write_baseline()
+        done = self.done(self.built_page())
+        self.assertNotIn("No progress to show", done)
+
+    def test_baseline_without_compare_still_matches_a_platform_campaign(self):
+        self.write_baseline()  # no compare, as every baseline recorded before #103
+        done = self.done(self.built_page())
+        self.assertNotIn("No progress to show", done)
+        self.assertIn("<strong>", done)
+
+    def test_bad_baseline_compare_is_rejected(self):
+        self.write_baseline(compare="os")
+        self.write_inputs()
+        with self.assertRaisesRegex(SystemExit, "compare must be one of"):
+            build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
 
     def test_bad_compare_is_rejected(self):
         for extra, message in (('compare = "os"\n', "compare must be one of"),
@@ -848,6 +889,27 @@ python = "3.13"
         build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
         sitemap = (self.site / "sitemap.xml").read_text(encoding="utf-8")
         self.assertIn("<loc>https://wheelgap.github.io/tracker/campaigns/</loc>", sitemap)
+
+    def test_sitemap_lists_the_repo_checker_once_after_the_campaigns(self):
+        self.write_inputs()
+        build_pages.build(self.coverage, self.site)
+        build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
+        sitemap = (self.site / "sitemap.xml").read_text(encoding="utf-8")
+        locs = re.findall(r"<loc>([^<]*)</loc>", sitemap)
+        self.assertEqual(locs[:2], ["https://wheelgap.github.io/tracker/", "https://wheelgap.github.io/tracker/check/"])
+        self.assertEqual(len(locs), len(set(locs)))
+        self.assertIn("https://wheelgap.github.io/tracker/campaigns/", locs)
+        # The URL is a real page in the published site.
+        self.assertTrue((Path(__file__).resolve().parents[1] / "site" / "check" / "index.html").exists())
+
+    def test_robots_txt_allows_all_and_names_the_sitemap(self):
+        self.write_inputs()
+        build_pages.build(self.coverage, self.site)
+        robots = (self.site / "robots.txt").read_text(encoding="utf-8")
+        self.assertEqual(
+            robots.splitlines(),
+            ["User-agent: *", "Allow: /", "", "Sitemap: https://wheelgap.github.io/tracker/sitemap.xml"],
+        )
 
     def test_home_page_footer_links_the_campaigns_index(self):
         home = (Path(__file__).resolve().parents[1] / "site" / "index.html").read_text(encoding="utf-8")
