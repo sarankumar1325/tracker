@@ -1,8 +1,11 @@
 """Offline regression tests for crawlable platform pages (#111)."""
 
+import datetime
 import html
 import json
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -267,6 +270,109 @@ class PackagePageRowLinkTests(unittest.TestCase):
         page = build_pages.page(package, scan, "3.13")
         self.assertIn('<th scope="row"><a href="../../platforms/linux-x86_64/">Linux x86_64</a></th>', page)
         self.assertIn('href="../../platforms/musl-aarch64/"', page)
+
+
+def night(i, wheels, wheelgap="0.13.0", label="3.15 win-arm64", packages=1000, bundled=0):
+    """One history.json entry, i nights after 2026-09-01."""
+    date = (datetime.date(2026, 9, 1) + datetime.timedelta(days=i)).isoformat()
+    return {"date": date, "wheelgap": wheelgap, "packages": packages,
+            "summary": {label: {"wheel": wheels, "bundled": bundled, "source": packages - wheels - bundled}}}
+
+
+class OverTimeTests(unittest.TestCase):
+    """The "Over time" section and the lede's change from data/history.json (#169).
+    Uses PlatformPageTests' fixture without rerunning its tests."""
+
+    setUp = PlatformPageTests.setUp
+    run_build = PlatformPageTests.run_build
+    read = PlatformPageTests.read
+
+    def build_with(self, history):
+        path = self.root / "history.json"
+        path.write_text(json.dumps(history), encoding="utf-8")
+        self.coverage.write_text(json.dumps(self.scan), encoding="utf-8")
+        self.index.write_text(json.dumps(self.wanted), encoding="utf-8")
+        build_platform_pages.build(self.coverage, self.index, self.site, None, path)
+        return self.read("win-arm64")
+
+    @staticmethod
+    def names(page):
+        section = page.split("<h2>Over time</h2>", 1)[1]
+        return re.findall(r"<tr><td>([^<]+)</td><td>(\d{4}-\d\d-\d\d)</td>", section)
+
+    def test_one_night(self):
+        page = self.build_with([night(0, 500)])
+        self.assertEqual(self.names(page), [("Latest", "2026-09-01")])
+        self.assertIn("500 / 1,000</td><td>50.0%", page)
+        self.assertIn("for Python 3.15.", page)  # one night: no change in the lede
+
+    def test_eight_nights(self):
+        page = self.build_with([night(i, 500 + i) for i in range(8)])
+        self.assertEqual(self.names(page), [
+            ("Latest", "2026-09-08"), ("Night before", "2026-09-07"), ("7 nights before", "2026-09-01"),
+        ])  # 7 nights before is also the first night, so it isn't repeated
+        self.assertIn("for Python 3.15, up 0.7 points since 2026-09-01.", page)
+
+    def test_forty_nights(self):
+        history = [night(i, 500 + i) for i in range(40)]
+        page = self.build_with(history)
+        self.assertEqual(self.names(page), [
+            ("Latest", "2026-10-10"), ("Night before", "2026-10-09"), ("7 nights before", "2026-10-03"),
+            ("30 nights before", "2026-09-10"), ("First recorded", "2026-09-01"),
+        ])
+        self.assertIn("53.9%", page)  # 539 / 1000
+        self.assertIn("for Python 3.15, up 3.0 points in 30 nights.", page)
+        # The shares are trend()'s for that label.
+        trend = build_platform_pages.build_campaigns.trend(history, "3.15 win-arm64", "")
+        for row in (trend[-1], trend[-2], trend[-8], trend[-31], trend[0]):
+            self.assertIn(f"<td>{row['percent']:.1f}%</td>", page)
+
+    def test_down_and_unchanged(self):
+        self.assertIn(", down 1.0 points since 2026-09-01.", self.build_with([night(0, 510), night(1, 500)]))
+        self.assertIn(", unchanged since 2026-09-01.", self.build_with([night(0, 500), night(1, 500)]))
+
+    def test_lede_change_matches_the_shares_shown(self):
+        # 1,000 / 3,000 is 33.3% and 1,004 / 3,000 is 33.5%: the lede says 0.2, not the unrounded 0.13 rounded to 0.1.
+        page = self.build_with([night(0, 1000, packages=3000), night(1, 1004, packages=3000)])
+        self.assertIn("<td>33.3%</td>", page)
+        self.assertIn("<td>33.5%</td>", page)
+        self.assertIn(", up 0.2 points since 2026-09-01.", page)
+
+    def test_upgrade_marks_rows_and_drops_the_lede_change(self):
+        history = [night(i, 500 + i, wheelgap="0.12.0" if i < 5 else "0.13.0") for i in range(8)]
+        page = self.build_with(history)
+        section = page.split("<h2>Over time</h2>", 1)[1]
+        rows = re.findall(r"<tr>(.*?)</tr>", section)
+        marked = [build_platform_pages.NOT_LIKE_FOR_LIKE in r for r in rows[1:]]  # skip the heading row
+        self.assertEqual(marked, [False, False, True])  # latest, night before, 7 nights before (0.12.0)
+        self.assertIn("for Python 3.15.", page)
+        self.assertNotIn(" points ", page.split("</header>", 1)[0])
+
+    def test_pyodide_counts_bundled(self):
+        page = self.build_with([night(0, 100, label="3.14 pyodide", bundled=700)])
+        pyodide = self.read("pyodide")
+        self.assertIn("Wheels and Pyodide builds", pyodide)
+        self.assertIn("800 / 1,000</td><td>80.0%", pyodide)
+        self.assertNotIn("<h2>Over time</h2>", page)  # no night has win-arm64
+
+    def test_no_history_leaves_the_pages_as_they_were(self):
+        self.run_build()
+        before = {p: self.read(p) for p in ("win-arm64", "pyodide")}
+        for history in ([], [None, {"date": "x"}]):
+            with self.subTest(history=history):
+                with mock.patch("sys.stdout"):
+                    self.build_with(history)
+                self.assertEqual({p: self.read(p) for p in before}, before)
+
+    def test_cli_history_flag(self):
+        self.coverage.write_text(json.dumps(self.scan), encoding="utf-8")
+        self.index.write_text(json.dumps(self.wanted), encoding="utf-8")
+        history = self.root / "history.json"
+        history.write_text(json.dumps([night(0, 500), night(1, 510)]), encoding="utf-8")
+        script = Path(__file__).resolve().parent.parent / "scripts" / "build_platform_pages.py"
+        subprocess.run([sys.executable, str(script), str(self.coverage), str(self.index), str(self.site),
+                        "--history", str(history)], check=True, capture_output=True)
+        self.assertIn("up 1.0 points since 2026-09-01", self.read("win-arm64"))
 
 
 if __name__ == "__main__":

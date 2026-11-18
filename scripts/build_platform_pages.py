@@ -1,8 +1,10 @@
 """Publish crawlable, JavaScript-free pages of the most-wanted missing wheels by platform.
 
-    python3 scripts/build_platform_pages.py data/coverage.json _site/data/most-wanted.json _site campaigns.toml
+    python3 scripts/build_platform_pages.py data/coverage.json _site/data/most-wanted.json _site campaigns.toml \
+        --history data/history.json
 
 Runs after the package and campaign pages so all platform URLs can be added to the same sitemap.
+With --history, each platform page also says how its share has moved over time (#169).
 """
 
 from __future__ import annotations
@@ -13,11 +15,12 @@ import sys
 from pathlib import Path
 
 if __package__:
-    from . import build_campaigns, build_lab, build_pages
+    from . import build_campaigns, build_lab, build_pages, update_history
 else:
     import build_campaigns
     import build_lab
     import build_pages
+    import update_history
 
 BASE = build_pages.BASE_URL
 CSP = build_pages.CSP
@@ -94,6 +97,59 @@ def _table(rows: list) -> str:
     )
 
 
+# Rows of the "Over time" table: how many nights before the latest one, and what the row is called.
+OVER_TIME_ROWS = ((0, "Latest"), (1, "Night before"), (7, "7 nights before"), (30, "30 nights before"))
+NOT_LIKE_FOR_LIKE = "different wheelgap version, not like for like"
+
+
+def over_time(rows: list[dict]) -> list[tuple[str, dict, bool]]:
+    """(name, trend row, whether a wheelgap upgrade falls between it and the latest night) for the
+    latest night, the night before, 7 and 30 nights before, and the first night recorded, skipping
+    any that don't exist or repeat. rows is build_campaigns.trend() for the label, oldest first."""
+    if not rows:
+        return []
+    last = len(rows) - 1
+    picked: list[tuple[str, int]] = []
+    for back, name in OVER_TIME_ROWS + ((last, "First recorded"),):
+        i = last - back
+        if i >= 0 and all(i != j for _, j in picked):
+            picked.append((name, i))
+    return [(name, rows[i], any(r["upgrade"] for r in rows[i + 1 :])) for name, i in picked]
+
+
+def change_note(rows: list[dict]) -> str:
+    """The change in share over the last 30 nights (or since the first night, with fewer), for the
+    lede: "" when there's only one night or a wheelgap upgrade falls in the span."""
+    if len(rows) < 2:
+        return ""
+    start = max(0, len(rows) - 1 - 30)
+    if any(r["upgrade"] for r in rows[start + 1 :]):
+        return ""
+    span = "in 30 nights" if start > 0 or len(rows) == 31 else f"since {rows[start]['date']}"
+    # From the one-decimal shares the table shows, so the lede and the table never differ by a rounding.
+    points = round(float(f"{rows[-1]['percent']:.1f}") - float(f"{rows[start]['percent']:.1f}"), 1)
+    if points == 0:
+        return f", unchanged {span}"
+    return f", {'up' if points > 0 else 'down'} {abs(points):.1f} points {span}"
+
+
+def _over_time_table(picked: list[tuple[str, dict, bool]], pyodide: bool) -> str:
+    e = html.escape
+    counted = "Wheels and Pyodide builds" if pyodide else "Wheels"
+    body = []
+    for name, row, upgraded in picked:
+        note = f' <span class="note">({NOT_LIKE_FOR_LIKE})</span>' if upgraded else ""
+        body.append(
+            f"<tr><td>{e(name)}</td><td>{e(str(row['date']))}</td>"
+            f"<td>{row['wheels']:,} / {row['packages']:,}</td><td>{row['percent']:.1f}%{note}</td></tr>"
+        )
+    return (
+        '<div class="matrix-scroll"><table class="matrix">'
+        f"<thead><tr><th>Night</th><th>Date</th><th>{counted}</th><th>Share</th></tr></thead>"
+        "<tbody>" + "".join(body) + "</tbody></table></div>"
+    )
+
+
 def _index_table(rows: list) -> str:
     """The platform index: each platform's share of the top packages with a wheel, lowest first."""
     e = html.escape
@@ -112,8 +168,17 @@ def _index_table(rows: list) -> str:
     )
 
 
-def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path | None = None) -> int:
+def build(
+    coverage_path: Path,
+    wanted_path: Path,
+    site: Path,
+    config_path: Path | None = None,
+    history_path: Path | None = None,
+) -> int:
+    """Write the platform pages; with history_path (data/history.json), each also gets an "Over time"
+    section and its change over 30 nights in the lede. Without it, or with an empty history, neither."""
     scan = json.loads(coverage_path.read_text(encoding="utf-8"))
+    history = update_history.read_history(history_path) if history_path is not None else []
     wanted = json.loads(wanted_path.read_text(encoding="utf-8"))
     if scan.get("schema") != SCAN_SCHEMA:
         sys.exit(f"build_platform_pages: coverage.json schema {scan.get('schema')!r}, expected {SCAN_SCHEMA}")
@@ -145,7 +210,11 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
         gaps = sum(p["results"][index] in ("source", "missing") for p in packages)
         percent = f"{ok * 100 / total:.1f}" if total else "0.0"
         what = "a prebuilt wheel or a Pyodide build" if platform == "pyodide" else "a prebuilt wheel"
-        lede = f"{ok:,} of the top {total:,} PyPI packages ({percent}%) have {what} on {friendly} for Python {python}."
+        trend = build_campaigns.trend(history, label, "") if history else []
+        lede = (
+            f"{ok:,} of the top {total:,} PyPI packages ({percent}%) have {what} on {friendly} "
+            f"for Python {python}{change_note(trend)}."
+        )
         source = wanted["targets"].get(label, [])
         table = _table(source[:50] if isinstance(source, list) else [])
 
@@ -165,6 +234,14 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
             f"<section><h2>Most-wanted wheels for Python {e(python)}</h2>{table}{extras}"
             '<p><a href="../../">Search every package</a></p></section>'
         )
+        picked = over_time(trend)
+        if picked:
+            content += (
+                f"<section><h2>Over time</h2>{_over_time_table(picked, platform == 'pyodide')}"
+                f'<p class="note">Nightly scan totals for {e(label)}, from data/history.json. A row marked'
+                f" &ldquo;{NOT_LIKE_FOR_LIKE}&rdquo; was scanned with an earlier wheelgap than the latest night,"
+                " so the difference can come from wheelgap rather than the packages.</p></section>"
+            )
         url = f"{BASE}platforms/{platform}/"
         folder = out / platform
         folder.mkdir(exist_ok=True)
@@ -206,6 +283,14 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
 
 
 if __name__ == "__main__":
-    coverage, wanted, site = (Path(p) for p in sys.argv[1:4])
-    config = Path(sys.argv[4]) if len(sys.argv) > 4 else None
-    print(f"platforms: {build(coverage, wanted, site, config)} pages in {site / 'platforms'}")
+    args = sys.argv[1:]
+    history_arg = None
+    if "--history" in args:
+        at = args.index("--history")
+        if at + 1 >= len(args):
+            sys.exit("build_platform_pages: --history needs a path")
+        history_arg = Path(args[at + 1])
+        del args[at : at + 2]
+    coverage, wanted, site = (Path(p) for p in args[0:3])
+    config = Path(args[3]) if len(args) > 3 else None
+    print(f"platforms: {build(coverage, wanted, site, config, history_arg)} pages in {site / 'platforms'}")

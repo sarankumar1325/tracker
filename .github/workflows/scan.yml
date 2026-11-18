@@ -258,7 +258,7 @@ jobs:
             || echo "::warning::couldn't download gap-wheels.json from wheelgap.github.io/wheels"
           python3 scripts/build_pages.py data/coverage.json _site notes "$RUNNER_TEMP/gap-wheels.json"
           python3 scripts/build_campaigns.py data/coverage.json data/history.json data/changes.json campaigns.toml _site
-          python3 scripts/build_platform_pages.py data/coverage.json _site/data/most-wanted.json _site campaigns.toml
+          python3 scripts/build_platform_pages.py data/coverage.json _site/data/most-wanted.json _site campaigns.toml --history data/history.json
           # Extra page: the legacy gap wheel index. Missing/malformed data only produces a warning.
           if ! python3 scripts/build_gap_index.py "$RUNNER_TEMP/gap-wheels.json" _site; then
             echo "::warning::build_gap_index failed, so the old gap wheels index isn't published this time"
