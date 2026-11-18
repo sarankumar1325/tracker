@@ -1304,3 +1304,38 @@ test("lookup: clicking a suggestion picks it and closes the list", async () => {
   get("search-autocomplete").handlers.click({ target: { closest: () => null } });
   assert.equal(get("search").value, names[2]);
 });
+
+test("modified arrows stay the input's, Tab closes the lookup list, and a press on the list keeps focus (#167)", async () => {
+  const { get } = await loadComboboxPage();
+  const press = (id, key, mods = {}) => {
+    let prevented = false;
+    get(id).handlers.keydown({ key, target: get(id), ...mods, preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  const MODS = ["shiftKey", "altKey", "ctrlKey", "metaKey"];
+  typeInto(get, "search", "num");
+  for (const mod of MODS) {
+    for (const key of ["ArrowDown", "ArrowUp"]) {
+      assert.equal(press("search", key, { [mod]: true }), false, `${mod}+${key} is left to the input (Shift extends the selection)`);
+      assert.equal(get("search").attrs["aria-activedescendant"], undefined, `${mod}+${key} highlights nothing`);
+    }
+  }
+  keyOn(get, "search", "ArrowDown");
+  assert.equal(get("search").attrs["aria-activedescendant"], "search-opt-0");
+  assert.equal(press("search", "Tab"), false, "Tab still moves focus on");
+  assert.equal(get("search-autocomplete").hidden, true, "the list doesn't stay open behind it");
+  assert.equal(get("search").attrs["aria-expanded"], "false");
+  assert.equal(get("search").attrs["aria-activedescendant"], undefined);
+  let kept = false;
+  get("search-autocomplete").handlers.mousedown({ preventDefault() { kept = true; } });
+  assert.ok(kept, "pressing an option doesn't take focus off the input");
+
+  get("cmd-trigger").handlers.click();
+  typeInto(get, "cmd-input", "num");
+  for (const mod of MODS) {
+    assert.equal(press("cmd-input", "ArrowDown", { [mod]: true }), false, `${mod}+ArrowDown is left to the input`);
+    assert.equal(get("cmd-input").attrs["aria-activedescendant"], "cmd-opt-0", `${mod}+ArrowDown moves nothing`);
+  }
+  keyOn(get, "cmd-input", "ArrowDown");
+  assert.equal(get("cmd-input").attrs["aria-activedescendant"], "cmd-opt-1");
+});

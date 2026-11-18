@@ -1740,7 +1740,7 @@ async function main() {
     const menu = $("search-autocomplete");
     if (!menu) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return; // Shift+Up/Down still extends the text selection
       e.preventDefault();
       if (menu.hidden) {
         updateSearchAutocomplete(e.target.value);
@@ -1753,8 +1753,8 @@ async function main() {
     } else if (e.key === "Enter" && !menu.hidden && searchActive >= 0) {
       e.preventDefault(); // picks the highlighted suggestion; with none, Enter submits the form as before
       pickSearchSuggestion(searchMatches[searchActive]);
-    } else if (e.key === "Escape" && !menu.hidden) {
-      closeSearchSuggestions();
+    } else if ((e.key === "Escape" || e.key === "Tab") && !menu.hidden) {
+      closeSearchSuggestions(); // Tab moves focus on as usual; the list closes rather than stay open behind it
     }
   });
   function pickSearchSuggestion(name) {
@@ -1765,6 +1765,8 @@ async function main() {
     renderLookup(name);
     writeHash();
   }
+  // A press on the list would otherwise move focus off the input (the options aren't focusable): keep it there.
+  $("search-autocomplete")?.addEventListener("mousedown", (e) => e.preventDefault());
   $("search-autocomplete")?.addEventListener("click", (e) => {
     const item = e.target.closest(".autocomplete-item");
     if (!item) return;
@@ -1803,6 +1805,7 @@ async function main() {
     const n = cmdMatches.length;
     if (!n || cmdActive < 0) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return; // as in the lookup: modified arrows stay the input's
       e.preventDefault();
       cmdActive = (cmdActive + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
       showActiveOption($("cmd-input"), "cmd-opt", n, cmdActive);
