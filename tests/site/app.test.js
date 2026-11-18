@@ -687,3 +687,169 @@ test("the blockers card never renders a hostile name from blockers.json (#93)", 
   assert.match(html, /ok-pkg/);
   assert.match(html, /e\.g\. <a href="p\/fine\/"/);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// The gaps table: filters, sort, paging and the CSV/JSON export (#148), on the committed data/coverage.json.
+// ---------------------------------------------------------------------------------------------------------------
+const run = (page, code) => vm.runInContext(code, page.context);
+const gapRows = (page) => (page.get("gaps").innerHTML.match(/<tr class="gap-row/g) ?? []).length;
+const pageClick = (n) => ({ target: { closest: (sel) => (sel === "button.page-btn" ? { disabled: false, dataset: { page: String(n) } } : null) } });
+const pageLabels = (html) => Array.from(html.matchAll(/data-page="(\d+)" aria-current="[^"]*">(\d+)<\/button>|<span class="page-ellipsis">…<\/span>/g),
+  (m) => (m[2] ?? "…"));
+
+test("the status pills keep only the selected target's source or missing results (#148)", async () => {
+  const page = await loadTablePage();
+  const all = run(page, "currentGapsList().length");
+  let shown = 0;
+  for (const [index, status] of [[1, "source"], [2, "missing"]]) {
+    page.group.handlers.click({ target: page.pills[index] });
+    const statuses = run(page, "(() => { const i = targetIndex(state.python, state.platform); return currentGapsList().map((p) => p.results[i]); })()");
+    assert.ok(statuses.length > 0, status);
+    assert.ok(statuses.every((s) => s === status), status);
+    shown += statuses.length;
+  }
+  assert.ok(shown <= all);
+  page.group.handlers.click({ target: page.pills[0] });
+  assert.equal(run(page, "currentGapsList().length"), all);
+});
+
+test("the name filter ignores case, goes back to page 1, and escapes what was typed (#148)", async () => {
+  const page = await loadTablePage();
+  const name = run(page, "currentGapsList()[0].name");
+  const typed = name.slice(0, 4).toUpperCase();
+  run(page, "state.currentPage = 2");
+  page.get("gaps-search").handlers.input({ target: { value: `  ${typed} ` } });
+  assert.equal(run(page, "state.currentPage"), 1);
+  const names = run(page, "currentGapsList().map((p) => p.name)");
+  assert.ok(names.includes(name));
+  assert.ok(names.every((n) => n.toLowerCase().includes(typed.toLowerCase())));
+
+  page.get("gaps-search").handlers.input({ target: { value: "<b>" } });
+  const html = page.get("gaps").innerHTML;
+  assert.match(html, /No matching gap packages for "&lt;b&gt;"\./);
+  assert.doesNotMatch(html, /<b>/);
+});
+
+test("each sort heading orders by its column and a second click reverses it (#148)", async () => {
+  const page = await loadTablePage();
+  const keys = {
+    rank: "p.rank",
+    name: "p.name",
+    status: "p.results[i] ?? ''",
+    downloads: "p.downloads ?? 0",
+  };
+  for (const header of page.headers) {
+    const col = header.dataset.sort;
+    const click = { target: { closest: (selector) => selector === "th.sortable" ? header : null } };
+    const directions = [];
+    for (let n = 0; n < 2; n++) {
+      page.head.handlers.click(click);
+      assert.equal(run(page, "state.sortCol"), col);
+      const dir = run(page, "state.sortDir");
+      directions.push(dir);
+      const values = run(page, `(() => { const i = targetIndex(state.python, state.platform); return currentGapsList().map((p) => ${keys[col]}); })()`);
+      assert.ok(values.length > 1);
+      for (let k = 1; k < values.length; k++) {
+        const a = values[k - 1], b = values[k];
+        const cmp = typeof a === "number" ? a - b : a.localeCompare(b);
+        assert.ok(dir === "asc" ? cmp <= 0 : cmp >= 0, `${col} ${dir}: ${a} before ${b}`);
+      }
+      assert.equal(header.getAttribute("aria-sort"), dir === "asc" ? "ascending" : "descending");
+    }
+    assert.notEqual(directions[0], directions[1], col);
+  }
+});
+
+test("page sizes 25, 100 and all show the right rows and range text (#148)", async () => {
+  const page = await loadTablePage();
+  const total = run(page, "currentGapsList().length");
+  assert.ok(total > 100, "the default target has more than 100 gaps");
+  const fmt = (n) => run(page, `fmt(${n})`);
+  for (const size of ["25", "100", "all"]) {
+    run(page, "state.currentPage = 3");
+    page.get("page-size-top").handlers.change({ target: { value: size } });
+    assert.equal(run(page, "state.currentPage"), 1);
+    const shown = size === "all" ? total : Number(size);
+    assert.equal(gapRows(page), shown, size);
+    assert.equal(page.get("pagination-info-top").textContent, `Showing ${fmt(1)}–${fmt(shown)} of ${fmt(total)} packages`);
+    assert.equal(page.get("pagination-info-bottom").textContent, page.get("pagination-info-top").textContent);
+    assert.equal(page.get("page-size-bottom").value, size);
+    if (size === "all") assert.equal(page.get("pagination-buttons-top").innerHTML, "");
+  }
+});
+
+test("page 5 of many shows 1 … 4 5 6 … N, and a filter change goes back to page 1 (#148)", async () => {
+  const page = await loadTablePage();
+  run(page, "state.pageSize = '10'; renderGaps()");
+  const pages = Math.ceil(run(page, "currentGapsList().length") / 10);
+  assert.ok(pages >= 9, "enough pages for both ellipses");
+  page.get("pagination-buttons-top").handlers.click(pageClick(5));
+  assert.equal(run(page, "state.currentPage"), 5);
+  assert.deepEqual(pageLabels(page.get("pagination-buttons-top").innerHTML), ["1", "…", "4", "5", "6", "…", String(pages)]);
+  assert.match(page.get("pagination-buttons-top").innerHTML, /data-page="5" aria-current="page">5</);
+  const first = run(page, "currentGapsList()[40].name");
+  assert.match(page.get("gaps").innerHTML, new RegExp(`data-pkg="${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
+
+  page.group.handlers.click({ target: page.pills[1] });
+  assert.equal(run(page, "state.currentPage"), 1);
+  assert.deepEqual(pageLabels(page.get("pagination-buttons-top").innerHTML).slice(0, 2), ["1", "2"]);
+});
+
+test("the CSV and JSON exports quote names and match the filtered table (#148)", async () => {
+  const downloads = [];
+  const page = await loadTablePage();
+  page.context.document.createElement = () => {
+    const a = { href: "", download: "", click() { downloads.push({ href: a.href, download: a.download }); } };
+    return a;
+  };
+  run(page, `(() => {
+    const i = targetIndex(state.python, state.platform);
+    const gap = gapsAt(state.data.packages, i).find((p) => p.results[i] === "missing");
+    gap.name = 'say "hi"';
+    gap.version = undefined;
+  })()`);
+  page.group.handlers.click({ target: page.pills[2] });
+  const expected = run(page, "currentGapsList().map((p) => p.name)");
+  const target = run(page, "[state.python, state.platform]");
+
+  run(page, "exportCSV(); exportJSON()");
+  assert.equal(downloads.length, 2);
+  const [csv, json] = downloads;
+  assert.equal(csv.download, `wheelgap-${target[1]}-py${target[0]}-gaps.csv`);
+  assert.equal(json.download, `wheelgap-${target[1]}-py${target[0]}-gaps.json`);
+
+  const csvText = decodeURIComponent(csv.href.replace(/^data:text\/csv;charset=utf-8,/, ""));
+  const lines = csvText.split("\n");
+  assert.equal(lines[0], "Rank,Package,Version,Status,Downloads,Platform,Python");
+  assert.equal(lines.length - 1, expected.length);
+  assert.ok(lines.slice(1).every((line) => line.includes(",missing,")));
+  assert.ok(lines.some((line) => /^\d+,"say ""hi""","",missing,\d+,/.test(line)), "a quote in the name is doubled");
+
+  const doc = JSON.parse(decodeURIComponent(json.href.replace(/^data:application\/json;charset=utf-8,/, "")));
+  assert.equal(doc.count, expected.length);
+  assert.deepEqual(doc.packages.map((p) => p.name), expected);
+  assert.deepEqual(doc.target, { python: target[0], platform: target[1] });
+  assert.ok(doc.packages.every((p) => p.status === "missing"));
+});
+
+test("both exports write unknown for a package with no result on the target (#148)", async () => {
+  const downloads = [];
+  const page = await loadTablePage();
+  page.context.document.createElement = () => {
+    const a = { href: "", download: "", click() { downloads.push(a.href); } };
+    return a;
+  };
+  run(page, `(() => {
+    const i = targetIndex(state.python, state.platform);
+    const gap = gapsAt(state.data.packages, i)[0];
+    gap.name = "no-result-here";
+    gap.results = gap.results.slice(0, i);
+  })()`);
+  page.get("gaps-search").handlers.input({ target: { value: "no-result-here" } });
+  run(page, "exportCSV(); exportJSON()");
+  const csvLines = decodeURIComponent(downloads[0].replace(/^data:[^,]*,/, "")).split("\n");
+  const doc = JSON.parse(decodeURIComponent(downloads[1].replace(/^data:[^,]*,/, "")));
+  assert.equal(csvLines.length, 2);
+  assert.equal(csvLines[1].split(",")[3], "unknown");
+  assert.equal(doc.packages[0].status, "unknown");
+});

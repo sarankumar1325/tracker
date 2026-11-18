@@ -1062,7 +1062,7 @@ function exportCSV() {
       p.rank,
       `"${p.name.replace(/"/g, '""')}"`,
       `"${(p.version ?? "").replace(/"/g, '""')}"`,
-      p.results[i] ?? "",
+      p.results[i] ?? "unknown",
       p.downloads ?? 0,
       state.platform,
       state.python,
