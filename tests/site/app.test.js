@@ -1222,7 +1222,7 @@ test("the live regions give the count once typing pauses, and say when nothing m
   assert.equal(get("search-status").textContent, "", "nothing is announced while typing");
   await settle();
   const count = optionIds(get("search-autocomplete").innerHTML).length;
-  assert.deepEqual(said, [`${count} suggestions. Use Up and Down to choose.`], "one announcement, for what was typed last");
+  assert.deepEqual(said, ["", `${count} suggestions. Use Up and Down to choose.`], "one announcement, for what was typed last, after clearing the region");
   typeInto(get, "search", "no-such-package-zzz");
   await settle();
   assert.equal(get("search-status").textContent, "No packages match.");
@@ -1275,4 +1275,32 @@ test("lookup: a pending \"No packages match.\" is dropped once the field is clea
   get("search-form").handlers.submit({ preventDefault() {} }); // Enter within the pause
   await settle();
   assert.deepEqual(said, [], "it would talk over an empty field or the lookup result");
+});
+
+test("the same count twice is announced again: the region is cleared before each write", async () => {
+  const { get } = await loadComboboxPage();
+  const said = [];
+  Object.defineProperty(get("search-status"), "textContent", { get: () => said.at(-1) ?? "", set: (v) => said.push(v) });
+  typeInto(get, "search", "n");
+  await settle();
+  typeInto(get, "search", "nu");
+  await settle();
+  const text = said.at(-1);
+  assert.match(text, /^8 suggestions\./, "both short queries hit the cap");
+  assert.deepEqual(said, ["", text, "", text]);
+});
+
+test("lookup: clicking a suggestion picks it and closes the list", async () => {
+  const { get, context } = await loadComboboxPage();
+  typeInto(get, "search", "num");
+  const names = optionNames(get("search-autocomplete").innerHTML, "data-name");
+  get("search-autocomplete").handlers.click({ target: { closest: (sel) => (sel === ".autocomplete-item" ? { dataset: { name: names[2] } } : null) } });
+  assert.equal(get("search").value, names[2]);
+  assert.equal(get("search-autocomplete").hidden, true);
+  assert.equal(get("search").attrs["aria-expanded"], "false");
+  assert.equal(get("search").attrs["aria-activedescendant"], undefined);
+  assert.match(context.location.hash, new RegExp(`package=${names[2]}`));
+  // A click outside an option does nothing.
+  get("search-autocomplete").handlers.click({ target: { closest: () => null } });
+  assert.equal(get("search").value, names[2]);
 });

@@ -1170,13 +1170,18 @@ function showActiveOption(input, prefix, count, active) {
 // the dialog: aria-modal hides everything outside it from assistive technology. A count is dropped if the list
 // has closed by then (Enter, Escape or a click within the pause), so it never talks over what replaced it.
 const ANNOUNCE_DELAY_MS = 500;
+const ANNOUNCE_CLEAR_MS = 50; // between clearing the region and writing the new text
 const announceTimers = {};
 function announceSuggestions(regionId, count, isOpen) {
   clearTimeout(announceTimers[regionId]);
   announceTimers[regionId] = setTimeout(() => {
     const region = $(regionId);
     if (!region || (count && isOpen && !isOpen())) return;
-    region.textContent = count ? `${count} suggestion${count === 1 ? "" : "s"}. Use Up and Down to choose.` : "No packages match.";
+    // Clear the region, then write: a screen reader may skip a live region whose text didn't change, and most
+    // short queries give the same "8 suggestions" as the one before.
+    const text = count ? `${count} suggestion${count === 1 ? "" : "s"}. Use Up and Down to choose.` : "No packages match.";
+    region.textContent = "";
+    announceTimers[regionId] = setTimeout(() => { region.textContent = text; }, ANNOUNCE_CLEAR_MS);
   }, ANNOUNCE_DELAY_MS);
 }
 
