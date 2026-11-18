@@ -67,3 +67,39 @@ class BuildCsvTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as caught:
             build_csv.build(self.coverage, self.out)
         self.assertIn("schema 2", str(caught.exception))
+
+    def test_history_writes_ordered_rows_and_matches_chart_rounding(self):
+        history = self.root / "history.json"
+        history.write_text(json.dumps([
+            {"date": "2026-11-12", "wheelgap": "0.14", "packages": 3, "summary": {
+                "3.14 pyodide": {"wheel": 1, "bundled": 1, "unknown": 1},
+            }},
+            {"date": "2026-11-11", "wheelgap": "0.13", "packages": 16, "summary": {
+                "3.13 linux-x86_64": {"wheel": 1, "missing": 15},
+                "3.14t musl-aarch64": {"wheel": 4, "source": 12},
+                "3.13 windows-arm64": {"bundled": 1},
+                "3.14 windows-arm64": {"wheel": True},
+                "3.14 linux-aarch64": "missing",
+            }},
+            {"date": "2026-11-10", "packages": 0, "summary": {"3.13 linux-x86_64": {"wheel": 0}}},
+            None,
+        ]), encoding="utf-8")
+
+        self.assertEqual(build_csv.build_history(history, self.out), 3)
+        with self.out.open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.reader(handle))
+        self.assertEqual(rows[0], [
+            "date", "wheelgap", "packages", "target", "python", "platform",
+            "wheel", "bundled", "source", "missing", "unknown", "share",
+        ])
+        self.assertEqual(rows[1:], [
+            ["2026-11-11", "0.13", "16", "3.13 linux-x86_64", "3.13", "linux-x86_64", "1", "0", "0", "15", "0", "6.3"],
+            ["2026-11-11", "0.13", "16", "3.14t musl-aarch64", "3.14t", "musl-aarch64", "4", "0", "12", "0", "0", "25.0"],
+            ["2026-11-12", "0.14", "3", "3.14 pyodide", "3.14", "pyodide", "1", "1", "0", "0", "1", "66.7"],
+        ])
+
+    def test_empty_history_writes_only_the_header(self):
+        history = self.root / "history.json"
+        history.write_text("[]", encoding="utf-8")
+        self.assertEqual(build_csv.build_history(history, self.out), 0)
+        self.assertEqual(len(self.out.read_text(encoding="utf-8").splitlines()), 1)

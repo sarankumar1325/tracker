@@ -25,8 +25,22 @@ SCAN_SCHEMA = 1
 OK = ("wheel", "bundled")  # counted as covered, as on the home page
 
 
-def _page(title: str, lede: str, meta: str, content: str, canonical: str, root: str) -> str:
+def _page(
+    title: str,
+    lede: str,
+    meta: str,
+    content: str,
+    canonical: str,
+    root: str,
+    feed_title: str | None = None,
+    feed_href: str | None = None,
+) -> str:
     e = html.escape
+    feed = (
+        f'\n  <link rel="alternate" type="application/atom+xml" title="{e(feed_title)}" href="{e(feed_href)}">'
+        if feed_title and feed_href
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -36,7 +50,7 @@ def _page(title: str, lede: str, meta: str, content: str, canonical: str, root: 
   <title>{e(title)}</title>
   <meta name="description" content="{e(lede, quote=True)}">
 {build_campaigns.og_tags(title, lede, canonical)}
-  <link rel="canonical" href="{e(canonical, quote=True)}">
+  <link rel="canonical" href="{e(canonical, quote=True)}">{feed}
   <link rel="stylesheet" href="{root}style.css">
   <link rel="icon" href="{root}favicon.svg" type="image/svg+xml">
 </head>
@@ -154,7 +168,19 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
         url = f"{BASE}platforms/{platform}/"
         folder = out / platform
         folder.mkdir(exist_ok=True)
-        (folder / "index.html").write_text(_page(title, lede, meta, content, url, "../../"), encoding="utf-8")
+        (folder / "index.html").write_text(
+            _page(
+                title,
+                lede,
+                meta,
+                content,
+                url,
+                "../../",
+                feed_title=f"New {platform} wheels",
+                feed_href=f"../../new/{platform}.xml",
+            ),
+            encoding="utf-8",
+        )
         index_rows.append((friendly, platform, python, ok, percent, gaps))
         urls.append(url)
 
