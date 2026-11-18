@@ -53,13 +53,22 @@ def package(name, results, rank=1, version="1.0", error=None, pure=False):
     }
 
 
+def summary_of(packages):
+    """Per-target counts of the packages' results, as wheelgap writes the summary (check_scan compares them)."""
+    summary = {label: {} for label in LABELS}
+    for p in packages:
+        for label, result in zip(LABELS, p["results"], strict=False):
+            summary[label][result] = summary[label].get(result, 0) + 1
+    return summary
+
+
 def scan(packages, wheelgap="0.9.0", generated="2026-11-13T03:20:00+00:00", locks=True):
     data = {
         "schema": 1,
         "generated": generated,
         "wheelgap": wheelgap,
         "targets": TARGETS,
-        "summary": {label: {"wheel": 1} for label in LABELS},
+        "summary": summary_of(packages),
         "packages": packages,
     }
     if locks:
@@ -206,13 +215,16 @@ class CheckScanTests(Repo):
             self.assertTrue(found[0].startswith(message), found)
 
     def test_a_large_drop_in_bundled_is_flagged_like_wheels(self):
-        data = scan([package("numpy", ["wheel", "source", "bundled"])])
-        data["summary"]["3.14 pyodide"] = {"wheel": 1, "bundled": 80}
-        history = [{"date": "2026-11-12", "summary": {"3.14 pyodide": {"wheel": 1, "bundled": 100}}}]
-        self.assertEqual(self.problems(data, history), [
-            "3.14 pyodide: bundled fell from 100 to 80 (if that's real, run the workflow by hand with allow_drop)"
+        # The summary matches the packages (check_scan compares them), so the history sets the drop: 1 bundled now.
+        data = scan([
+            package("numpy", ["wheel", "source", "bundled"]),
+            package("pyyaml", ["wheel", "source", "source"], rank=2),
         ])
-        data["summary"]["3.14 pyodide"]["bundled"] = 95
+        history = [{"date": "2026-11-12", "summary": {"3.14 pyodide": {"bundled": 2}}}]
+        self.assertEqual(self.problems(data, history), [
+            "3.14 pyodide: bundled fell from 2 to 1 (if that's real, run the workflow by hand with allow_drop)"
+        ])
+        history[0]["summary"]["3.14 pyodide"]["bundled"] = 1
         self.assertEqual(self.problems(data, history), [])
 
 

@@ -123,6 +123,48 @@ The site is deliberately simple, so it's a good place to start. Ideas and fixes 
 
 If you want to help a project ship a missing wheel, see [How to get a missing wheel added upstream](docs/adding-wheels-upstream.md).
 
-The scripts have offline tests in `tests/`: run them with `uvx pytest` (or `python -m unittest discover -s tests`). The site's helpers in `site/logic.js` have node tests: `node --test tests/site/logic.test.js tests/site/scripts.test.js`. The [Check](.github/workflows/check.yml) workflow runs both, `python3 scripts/check_notes.py`, and `node --check` on the site's scripts, on every pull request.
+### Working on the site
+
+`site/` can't be opened as it is: its pages fetch `data/coverage.json`, `data/packages/<name>.json`, `data/most-wanted.json` and other files that only exist after the publish step ("Assemble the site" in [`scan.yml`](.github/workflows/scan.yml)) builds them, and the package, platform, campaign and New wheels pages are generated there too. To build the same `_site/` from the committed data (Python 3.11 or newer, since the scripts use `tomllib`, and nothing else), run from the repository root:
+
+```sh
+rm -rf _site && mkdir -p _site/data
+cp -r site/. _site/
+cp data/*.json _site/data/
+python3 scripts/build_lookup.py data/coverage.json _site/data/packages
+python3 scripts/build_csv.py data/coverage.json _site/data/coverage.csv \
+  --history data/history.json _site/data/history.csv
+python3 scripts/build_most_wanted.py data/coverage.json _site/data/most-wanted.json
+python3 scripts/build_badges.py data/coverage.json _site/badge
+python3 scripts/build_pages.py data/coverage.json _site notes
+python3 scripts/build_campaigns.py data/coverage.json data/history.json data/changes.json campaigns.toml _site
+python3 scripts/build_platform_pages.py data/coverage.json _site/data/most-wanted.json _site campaigns.toml
+python3 scripts/build_blockers.py data/coverage.json _site/data/blockers.json
+python3 scripts/build_drops.py data/drops.json data/coverage.json _site
+python3 scripts/build_new_wheels.py data/changes.json data/coverage.json _site
+python3 -m http.server -d _site --bind 127.0.0.1
+```
+
+Then open <http://localhost:8000/> for the home page, or a package page such as <http://localhost:8000/p/numpy/>. `_site/` is in `.gitignore`. Rerun the commands after a change to `site/` or `scripts/`.
+
+The publish step also downloads `gap-wheels.json` from [wheelgap/wheels](https://github.com/wheelgap/wheels); the commands above skip it. Without it the package pages have no gap wheel hints, and the legacy gap wheel index (`build_gap_index.py`) isn't built. Two more things only work on the published site:
+
+- `site/404.html` uses absolute `/tracker/` paths, so its styles load only under that prefix;
+- the lookup fetches the gap wheel list from `../wheels/data/gap-wheels.json`, which a local server doesn't have, so it shows no gap wheels.
+
+### Tests
+
+The [Check](.github/workflows/check.yml) workflow runs these on every pull request; run the same before you open one:
+
+```sh
+uvx --python 3.14 pytest@8.4.2
+python3 scripts/check_notes.py
+pin=$(sed -n 's/^export const WHEELGAP = "wheelgap==\(.*\)";$/\1/p' site/check/worker.mjs)
+uvx --python 3.14 --refresh-package wheelgap --with "wheelgap==$pin" pytest@8.4.2 tests/test_check_driver.py
+node --check site/logic.js && node --check site/not-found.js && node --check site/app.js && node --check site/lab.js && for f in site/check/*.mjs; do node --check "$f"; done
+node --test tests/site/logic.test.js tests/site/scripts.test.js tests/site/check-logic.test.mjs tests/site/app.test.js tests/site/not-found.test.js
+```
+
+The first pytest run skips `tests/test_check_driver.py` when wheelgap isn't installed; the third command runs it with the wheelgap version the browser checker pins. Without `uv`, run the script tests on your own Python (3.11 or newer) in a virtual environment, since Homebrew's and most Linux distributions' `python3` refuse a plain `pip install`: `python3 -m venv .venv && .venv/bin/python -m pip install pytest==8.4.2 && .venv/bin/python -m pytest`. `unittest` alone doesn't collect most of them.
 
 Package notes (workarounds, alternatives, upstream issues) live in [`notes/`](notes/), one TOML file per package, and are shown on the package pages and in the API. The format is in [`notes/README.md`](notes/README.md).

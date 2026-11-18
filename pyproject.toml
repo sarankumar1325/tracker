@@ -1,5 +1,5 @@
-# Only test settings: the tracker isn't a package. Run the tests with `uvx pytest` or
-# `python -m unittest discover -s tests`.
+# Only test settings: the tracker isn't a package. Run the tests as the README's Tests section
+# says (pytest; `unittest` doesn't collect most of them).
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

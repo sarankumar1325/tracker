@@ -25,13 +25,25 @@ def package(rank, name, results=("wheel", "source"), error=None):
 
 
 def scan(packages=None, generated="2026-11-10T03:20:00+00:00", wheels=(3, 1)):
+    """A scan whose summary matches its packages, as check_scan requires. Without packages, it has
+    at least 3, with wheels[j] of them having a wheel on target j and the rest building from source."""
+    if packages is None:
+        count = max(3, *wheels)
+        packages = [
+            package(i, f"pkg{i}", results=["wheel" if i <= n else "source" for n in wheels])
+            for i in range(1, count + 1)
+        ]
+    summary = {label: {} for label in LABELS}
+    for p in packages:
+        for label, result in zip(LABELS, p.get("results", ()), strict=False):
+            summary[label][result] = summary[label].get(result, 0) + 1
     return {
         "schema": 1,
         "generated": generated,
         "wheelgap": "0.7.0",
         "targets": [{"label": label} for label in LABELS],
-        "summary": {label: {"wheel": n} for label, n in zip(LABELS, wheels, strict=True)},
-        "packages": packages if packages is not None else [package(i, f"pkg{i}") for i in (1, 2, 3)],
+        "summary": summary,
+        "packages": packages,
     }
 
 
@@ -157,6 +169,71 @@ class CheckScanTests(unittest.TestCase):
         os.environ["ALLOW_DROP"] = "true"
         history = [{"date": "2026-11-09", "summary": {LABELS[0]: {"wheel": 100}}}]
         self.assertEqual(check_scan.problems(scan(wheels=(10, 1)), history, top=3), [])
+
+    def test_summary_that_disagrees_with_the_packages(self):
+        data = scan()
+        data["summary"][LABELS[1]]["wheel"] = 4
+        self.assertEqual(check_scan.problems(data, [], top=3), [
+            f"{LABELS[1]}: summary says 4 wheel, the packages have 1"
+        ])
+
+    def test_summary_kind_the_packages_do_not_have(self):
+        data = scan()
+        data["summary"][LABELS[0]]["missing"] = 2
+        self.assertEqual(check_scan.problems(data, [], top=3), [
+            f"{LABELS[0]}: summary says 2 missing, the packages have 0"
+        ])
+
+    def test_result_missing_from_the_summary_counts_as_zero(self):
+        data = scan()
+        del data["summary"][LABELS[1]]["source"]
+        self.assertEqual(check_scan.problems(data, [], top=3), [
+            f"{LABELS[1]}: summary says 0 source, the packages have 2"
+        ])
+
+    def test_zero_counts_in_the_summary_are_fine(self):
+        data = scan()
+        data["summary"][LABELS[0]].update(missing=0, unknown=0, bundled=0)
+        self.assertEqual(check_scan.problems(data, [], top=3), [])
+
+    def test_duplicate_normalized_name(self):
+        data = scan(packages=[package(1, "Foo_Bar"), package(2, "other"), package(3, "foo.bar")])
+        self.assertEqual(
+            check_scan.problems(data, [], top=3), ["duplicate package: 'Foo_Bar' and 'foo.bar' are both 'foo-bar'"]
+        )
+
+    def test_unparseable_generated(self):
+        for generated in ("yesterday", "", None, "2026-13-01T00:00:00"):
+            with self.subTest(generated=generated):
+                found = check_scan.problems(scan(generated=generated), [], top=3)
+                self.assertEqual(found, [f"generated {generated!r} isn't an ISO 8601 timestamp"])
+
+    def test_generated_that_does_not_start_with_its_date(self):
+        # fromisoformat accepts these, but update_history.py would date the night by their first 10 characters.
+        for generated in ("20261110T032000Z", "2026-W46-2T03:20:00"):
+            with self.subTest(generated=generated):
+                found = check_scan.problems(scan(generated=generated), [], top=3)
+                self.assertEqual(found, [f"generated {generated!r} doesn't start with its date as YYYY-MM-DD"])
+        for generated in ("2026-11-10T03:20:00Z", "2026-11-10 03:20:00+00:00", "2026-11-10"):
+            with self.subTest(generated=generated):
+                self.assertEqual(check_scan.problems(scan(generated=generated), [], top=3), [])
+
+    def test_generated_before_the_last_history_entry(self):
+        history = [{"date": "2026-11-11", "summary": {}}]
+        found = check_scan.problems(scan(generated="2026-11-10T03:20:00+00:00"), history, top=3)
+        self.assertEqual(found, ["generated 2026-11-10T03:20:00+00:00 is before the last history entry, 2026-11-11"])
+
+    def test_generated_on_or_after_the_last_history_entry(self):
+        for last in ("2026-11-10", "2026-11-09"):
+            with self.subTest(last=last):
+                history = [{"date": last, "summary": {}}]
+                self.assertEqual(check_scan.problems(scan(generated="2026-11-10T23:59:00Z"), history, top=3), [])
+
+    def test_committed_scan_passes(self):
+        root = Path(__file__).resolve().parent.parent / "data"
+        data = json.loads((root / "coverage.json").read_text(encoding="utf-8"))
+        history = json.loads((root / "history.json").read_text(encoding="utf-8"))
+        self.assertEqual(check_scan.problems(data, history, top=5000), [])
 
 
 class BuildLookupTests(TempDir):

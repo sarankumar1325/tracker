@@ -3,8 +3,10 @@
     python scripts/check_scan.py data/coverage.json data/history.json 5000
 
 Checks: the shape scripts/build_lookup.py needs, results the scripts know, enough packages, every
-target summarised, few lookup errors, and no target's wheel or bundled count dropping sharply since
-the last entry in the history (a PyPI outage, not a real change).
+target summarised, each summary matching the packages' results, no duplicate package names, a
+`generated` that parses and isn't before the last history entry, few lookup errors, and no target's
+wheel or bundled count dropping sharply since the last entry in the history (a PyPI outage, not a
+real change).
 
 For `bundled` (wheelgap --pyodide-lock): it's only on pyodide targets, the scan's pyodide_locks are
 well formed and are the committed lock files listed in pyodide/locks.json (pyodide_locks.py), each
@@ -16,6 +18,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 if __package__:  # imported as scripts.check_scan (the tests)
@@ -56,6 +60,56 @@ def bundled_problems(scan: dict, root: Path) -> list[str]:
     return out
 
 
+def consistency_problems(scan: dict) -> list[str]:
+    """Summary vs results, and duplicate names; the package entries must be well formed.
+
+    The platform cards count packages[].results while the "+N this scan" delta and history.json use
+    summary, so the two must agree. update_changes.diff() keys packages by name, so a duplicate
+    normalized name would silently lose one entry."""
+    out = []
+    summary = scan.get("summary", {})
+    for i, target in enumerate(scan.get("targets", [])):
+        label = target["label"]
+        stated = summary.get(label)
+        if not isinstance(stated, dict):
+            continue  # reported as a target without a summary
+        counted = Counter(p["results"][i] for p in scan.get("packages", []))
+        for kind in sorted(set(counted) | set(stated)):
+            says = stated.get(kind, 0)
+            if says != counted.get(kind, 0):
+                out.append(f"{label}: summary says {says} {kind}, the packages have {counted.get(kind, 0)}")
+                break
+        if out:
+            break
+    seen: dict[str, str] = {}
+    for p in scan.get("packages", []):
+        key = pyodide_locks.canonical(p["name"])
+        if key in seen:
+            out.append(f"duplicate package: {seen[key]!r} and {p['name']!r} are both {key!r}")
+            break
+        seen[key] = p["name"]
+    return out
+
+
+def generated_problems(scan: dict, history: list[dict]) -> list[str]:
+    """update_history.py and update_changes.py date the night by generated[:10], so it must parse,
+    start with that date, and mustn't be before the last history entry (the same day is fine: it
+    replaces that entry)."""
+    generated = scan.get("generated")
+    try:
+        when = datetime.fromisoformat(generated)
+    except (TypeError, ValueError):
+        return [f"generated {generated!r} isn't an ISO 8601 timestamp"]
+    # fromisoformat also takes forms like 20261117T035000Z or 2026-W47-1, whose first 10 characters
+    # aren't the date the history would be given.
+    if generated[:10] != when.date().isoformat():
+        return [f"generated {generated!r} doesn't start with its date as YYYY-MM-DD"]
+    last = history[-1].get("date") if history and isinstance(history[-1], dict) else None
+    if isinstance(last, str) and when.date().isoformat() < last:
+        return [f"generated {generated} is before the last history entry, {last}"]
+    return []
+
+
 def problems(scan: dict, history: list[dict], top: int, root: Path = pyodide_locks.ROOT) -> list[str]:
     out = []
     n = len(scan.get("packages", []))
@@ -86,7 +140,9 @@ def problems(scan: dict, history: list[dict], top: int, root: Path = pyodide_loc
             out.append(f"{p['name']}: bundled on a target that isn't pyodide")
             break
     if len(out) == before_entries:  # the package entries are well formed, so their results can be read
+        out += consistency_problems(scan)
         out += bundled_problems(scan, root)
+    out += generated_problems(scan, history)
     errors = scan.get("lookup_errors", sum(1 for p in scan.get("packages", []) if p.get("error")))
     if n and errors > MAX_ERROR_SHARE * n:
         out.append(f"{errors} of {n} lookups failed")
