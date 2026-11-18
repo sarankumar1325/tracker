@@ -716,7 +716,7 @@ def build(
     python = newest_non_free_threaded(scan["targets"])
     found = pyodide_locks.releases(scan, root)
     changes_path = changes_path or coverage_path.parent / "changes.json"
-    changes = json.loads(changes_path.read_text(encoding="utf-8")) if changes_path.exists() else []
+    changes = update_changes.read_changes(changes_path)
     pkg_changes = changes_by_package(changes)
     memberships: dict[str, list[tuple[str, dict]]] = {}
     config_path = config_path or coverage_path.parent.parent / "campaigns.toml"

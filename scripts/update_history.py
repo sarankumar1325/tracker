@@ -12,7 +12,38 @@ import json
 import sys
 from pathlib import Path
 
+if __package__:  # imported as scripts.update_history (the tests)
+    from . import update_changes
+else:  # run as python scripts/update_history.py
+    import update_changes
+
 MAX_DAYS = 730  # Keep about two years of nightly scans (one entry per date)
+
+
+def read_history(path: Path) -> list[dict]:
+    """history.json's entries, keeping only well-formed ones, for the publish step.
+
+    Like update_changes.read_changes: a missing file is [], one that isn't valid JSON or isn't a
+    list is [] with a warning, and otherwise an entry is kept when it's a dict with a YYYY-MM-DD
+    `date` and a dict `summary`, and within the summary only targets whose value is a dict. One
+    warning says how many entries and targets were dropped."""
+    entries: list[dict] = []
+    dropped = 0
+    for entry in update_changes._read_json_list(path):
+        if not (
+            isinstance(entry, dict)
+            and isinstance(entry.get("date"), str)
+            and update_changes.DATE.fullmatch(entry["date"])
+            and isinstance(entry.get("summary"), dict)
+        ):
+            dropped += 1
+            continue
+        summary = {label: cell for label, cell in entry["summary"].items() if isinstance(cell, dict)}
+        dropped += len(entry["summary"]) - len(summary)
+        entries.append({**entry, "summary": summary})
+    if dropped:
+        print(f"::warning::{path}: left out {dropped} malformed entr(y/ies) or target(s)")
+    return entries
 
 
 def update(coverage_path: Path, history_path: Path, max_days: int = MAX_DAYS) -> dict:

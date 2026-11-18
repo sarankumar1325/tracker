@@ -1,5 +1,7 @@
 """Offline checks for the campaign pages and their index."""
 
+import contextlib
+import io
 import re
 import json
 import subprocess
@@ -8,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import build_campaigns, build_pages
+from scripts import build_campaigns, build_pages, update_history
 
 
 CONFIG = """
@@ -498,11 +500,15 @@ class CampaignTests(unittest.TestCase):
 
     def test_trend_date_and_upgrade_are_escaped(self):
         self.history_data[0]["wheelgap"] = "0.7.0"
-        self.history_data[1]["date"] = "2026-11-11<b>"
         self.history_data[1]["wheelgap"] = "0.9<i>"
         trend = self.trend(self.built_page())
-        self.assertIn("<td>2026-11-11&lt;b&gt;</td>", trend)
         self.assertIn("<td>wheelgap 0.9&lt;i&gt;</td>", trend)
+        # A date that isn't YYYY-MM-DD is left out by update_history.read_history (#168), so it never reaches the page.
+        self.history_data[1]["date"] = "2026-11-11<b>"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            trend = self.trend(self.built_page())
+        self.assertIn("::warning::", out.getvalue())
+        self.assertNotIn("2026-11-11", trend)
         self.assertNotIn("<b>", trend)
         self.assertNotIn("<i>", trend)
 
@@ -752,11 +758,14 @@ class CampaignTests(unittest.TestCase):
 
     def test_baseline_values_in_the_done_table_are_escaped(self):
         self.write_baseline(recorded="2026-11-12<r>", packages=[{"name": "NumPy", "status": "<s>"}])
+        # A date that isn't YYYY-MM-DD is left out by update_changes.read_changes (#168), so it never reaches the page.
         self.changes_data[1]["date"] = "2026-11-11<d>"
-        done = self.done(self.built_page())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            done = self.done(self.built_page())
+        self.assertIn("::warning::", out.getvalue())
         self.assertIn("reconstructed on 2026-11-12&lt;r&gt;", done)
         self.assertIn("<td>&lt;s&gt;</td>", done)
-        self.assertIn("<td>2026-11-11&lt;d&gt;</td>", done)
+        self.assertNotIn("2026-11-11", done)
         for raw in ("<r>", "<s>", "<d>"):
             self.assertNotIn(raw, done)
 
@@ -982,6 +991,67 @@ python = "3.13"
         with self.assertRaisesRegex(SystemExit, "schema 2.*expected 1"):
             build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
         self.assertFalse((self.site / "campaigns").exists())
+
+
+class MalformedHistoryAndChangesTests(unittest.TestCase):
+    """build_campaigns keeps going on a malformed history.json or changes.json (#168).
+    Uses CampaignTests' fixture without rerunning its tests."""
+
+    setUp = CampaignTests.setUp
+    write_inputs = CampaignTests.write_inputs
+    recordable = CampaignTests.recordable
+
+    def build_quietly(self):
+        self.write_inputs()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            built = build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site)
+        self.assertEqual(built, 1)
+        self.assertTrue((self.site / "campaigns" / "musl-aarch64" / "index.html").exists())
+        return out.getvalue()
+
+    def test_malformed_history_entries_warn_and_build(self):
+        for bad in ([None], [{"date": "2026-11-17", "summary": None}], {"date": "2026-11-17"}):
+            with self.subTest(bad=bad):
+                self.history_data = bad
+                self.assertIn("::warning::", self.build_quietly())
+
+    def test_malformed_changes_warn_and_build(self):
+        for bad in ([{"date": "2026-11-17", "gained": None, "lost": []}], [{"date": "2026-11-17"}], {"x": 1}):
+            with self.subTest(bad=bad):
+                self.changes_data = bad
+                self.assertIn("::warning::", self.build_quietly())
+
+    def test_invalid_json_warns_and_builds(self):
+        self.write_inputs()
+        self.history.write_text("[{", encoding="utf-8")
+        self.changes.write_text("[{", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site), 1)
+        self.assertEqual(out.getvalue().count("::warning::"), 2)
+
+    def test_record_baselines_survives_malformed_changes(self):
+        self.recordable()
+        self.changes.write_text('[{"date": "2026-11-17", "gained": null, "lost": []}]', encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            build_campaigns.record_baselines(self.coverage, self.changes, self.config, self.root / "baselines", log=lambda m: None)
+        self.assertIn("::warning::", out.getvalue())
+
+    def test_read_history_keeps_good_entries_and_targets(self):
+        good = {"date": "2026-11-16", "wheelgap": "0.9.0", "packages": 5, "summary": {"L": {"wheel": 4}}}
+        self.history.write_text(json.dumps([
+            good, None, {"date": "2026-11-17", "summary": {"L": {"wheel": 5}, "M": None}}, {"date": "x", "summary": {}},
+        ]), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            got = update_history.read_history(self.history)
+        self.assertEqual(got, [good, {"date": "2026-11-17", "summary": {"L": {"wheel": 5}}}])
+        self.assertIn("::warning::", out.getvalue())
+
+    def test_read_history_valid_file_unchanged_and_quiet(self):
+        self.write_inputs()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(update_history.read_history(self.history), self.history_data)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(update_history.read_history(self.root / "missing.json"), [])
 
 
 if __name__ == "__main__":

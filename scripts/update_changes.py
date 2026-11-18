@@ -15,12 +15,68 @@ small.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
 
 KEEP_DAYS = 90
 INSTALLABLE = ("wheel", "bundled")
+
+
+DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def read_changes(path: Path) -> list[dict]:
+    """changes.json's days, keeping only well-formed ones, for the publish step.
+
+    The file is written by the scan job, so a half-written or odd one warns and is read as far as
+    it's usable rather than stopping the deploy: a missing file is [], a file that isn't valid JSON
+    or isn't a list is [] with a warning, and otherwise a day is kept when it's a dict with a
+    YYYY-MM-DD `date` and `gained`/`lost` lists, and within those only dicts with string `name`,
+    `version` and `target`. One warning says how many days and items were dropped."""
+    data = _read_json_list(path)
+    days: list[dict] = []
+    dropped = 0
+    for day in data:
+        if not (
+            isinstance(day, dict)
+            and isinstance(day.get("date"), str)
+            and DATE.fullmatch(day["date"])
+            and isinstance(day.get("gained"), list)
+            and isinstance(day.get("lost"), list)
+        ):
+            dropped += 1
+            continue
+        kept = dict(day)
+        for kind in ("gained", "lost"):
+            items = [i for i in day[kind] if _change_item_ok(i)]
+            dropped += len(day[kind]) - len(items)
+            kept[kind] = items
+        days.append(kept)
+    if dropped:
+        print(f"::warning::{path}: left out {dropped} malformed day(s) or item(s)")
+    return days
+
+
+def _change_item_ok(item: object) -> bool:
+    return isinstance(item, dict) and all(isinstance(item.get(k), str) for k in ("name", "version", "target"))
+
+
+def _read_json_list(path: Path) -> list:
+    """The JSON list in path: [] for a missing file, and [] with a warning for one that can't be
+    read, isn't valid JSON, or isn't a list."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, RecursionError) as e:
+        print(f"::warning::{path} isn't readable JSON ({type(e).__name__}), so it's read as empty")
+        return []
+    if not isinstance(data, list):
+        print(f"::warning::{path} isn't a JSON list, so it's read as empty")
+        return []
+    return data
 
 
 def counts(frm: str, to: str) -> bool:

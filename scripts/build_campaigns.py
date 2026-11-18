@@ -39,9 +39,11 @@ import tomllib
 from pathlib import Path
 
 if __package__:  # imported as scripts.build_campaigns (the tests)
-    from . import check_notes
+    from . import check_notes, update_changes, update_history
 else:  # run as python scripts/build_campaigns.py
     import check_notes
+    import update_changes
+    import update_history
 
 SCAN_SCHEMA = 1
 BASELINE_SCHEMA = 1
@@ -1007,7 +1009,7 @@ def record_baselines(
     and tried again the next night, so a baseline is never frozen from an imperfect scan.
     """
     scan = load_scan(coverage_path)
-    changes = json.loads(changes_path.read_text(encoding="utf-8")) if changes_path.exists() else []
+    changes = update_changes.read_changes(changes_path)
     campaigns = load_campaigns(config_path)
     newest = newest_non_free_threaded(scan["targets"])
     written = []
@@ -1041,8 +1043,8 @@ def build(
     notes = check_notes.load(notes_dir, scan) if notes_dir is not None else {}
     if baselines is None:
         baselines = coverage_path.parent / "campaigns"
-    history = json.loads(history_path.read_text(encoding="utf-8")) if history_path.exists() else []
-    changes = json.loads(changes_path.read_text(encoding="utf-8")) if changes_path.exists() else []
+    history = update_history.read_history(history_path)
+    changes = update_changes.read_changes(changes_path)
     campaigns = load_campaigns(config_path)
     newest = newest_non_free_threaded(scan["targets"])
     urls: list[str] = [f"{BASE_URL}campaigns/"]
