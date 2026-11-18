@@ -1093,6 +1093,7 @@ async function loadComboboxPage() {
     context.document.getElementById = (id) => {
       const node = byId(id);
       if (!node.attrs) {
+        node.focus = () => { context.document.activeElement = node; };
         node.attrs = {};
         node.classes = new Set();
         node.setAttribute = (k, v) => { node.attrs[k] = String(v); };
@@ -1133,6 +1134,7 @@ test("both search inputs and lists carry the combobox roles (#167)", () => {
 
 test("lookup: Down and Up move aria-activedescendant while focus stays in the input, Enter picks it (#167)", async () => {
   const { get, context } = await loadComboboxPage();
+  get("search").focus();
   typeInto(get, "search", "num");
   const menu = get("search-autocomplete");
   assert.equal(menu.hidden, false);
@@ -1141,8 +1143,8 @@ test("lookup: Down and Up move aria-activedescendant while focus stays in the in
   assert.ok(ids.length >= 2, "several suggestions");
   assert.deepEqual(ids, ids.map((_, k) => `search-opt-${k}`), "ids come from the index");
   assert.doesNotMatch(menu.innerHTML, /role="button"|tabindex/);
+  assert.doesNotMatch(menu.innerHTML, /aria-selected="true"/, "no option is rendered selected");
   assert.equal(get("search").attrs["aria-activedescendant"], undefined, "nothing is highlighted until Up or Down");
-  const focusBefore = context.document.activeElement;
   assert.ok(keyOn(get, "search", "ArrowDown"));
   assert.equal(get("search").attrs["aria-activedescendant"], "search-opt-0");
   assert.deepEqual(selectedOptions(get, ids), ["search-opt-0"]);
@@ -1155,7 +1157,7 @@ test("lookup: Down and Up move aria-activedescendant while focus stays in the in
   assert.equal(get("search").attrs["aria-activedescendant"], ids.at(-1));
   keyOn(get, "search", "ArrowDown"); // and back round to the first
   keyOn(get, "search", "ArrowDown");
-  assert.equal(context.document.activeElement, focusBefore, "focus never left the input");
+  assert.equal(context.document.activeElement, get("search"), "focus never left the input");
   const names = optionNames(menu.innerHTML, "data-name");
   assert.ok(keyOn(get, "search", "Enter"), "Enter on a highlighted option is the option's, not the form's");
   assert.equal(get("search").value, names[1]);
@@ -1260,4 +1262,17 @@ test("lookup: no count is announced once the list has closed within the pause (#
   keyOn(get, "search", "Enter"); // picks a suggestion and closes the list before the pause ends
   await settle();
   assert.deepEqual(said, [], "the count would talk over the lookup result");
+});
+
+test("lookup: a pending \"No packages match.\" is dropped once the field is cleared or submitted (#167)", async () => {
+  const { get } = await loadComboboxPage();
+  const said = [];
+  Object.defineProperty(get("search-status"), "textContent", { get: () => said.at(-1) ?? "", set: (v) => said.push(v) });
+  typeInto(get, "search", "no-such-package-zzz");
+  typeInto(get, "search", ""); // backspaced to empty within the pause
+  await settle();
+  typeInto(get, "search", "no-such-package-zzz");
+  get("search-form").handlers.submit({ preventDefault() {} }); // Enter within the pause
+  await settle();
+  assert.deepEqual(said, [], "it would talk over an empty field or the lookup result");
 });

@@ -1175,7 +1175,7 @@ function announceSuggestions(regionId, count, isOpen) {
   clearTimeout(announceTimers[regionId]);
   announceTimers[regionId] = setTimeout(() => {
     const region = $(regionId);
-    if (!region || (count && !isOpen())) return;
+    if (!region || (count && isOpen && !isOpen())) return;
     region.textContent = count ? `${count} suggestion${count === 1 ? "" : "s"}. Use Up and Down to choose.` : "No packages match.";
   }, ANNOUNCE_DELAY_MS);
 }
@@ -1344,9 +1344,9 @@ function updateSearchAutocomplete(value) {
 
   searchMatches = matches.map((p) => p.name);
   searchActive = -1;
-  announceSuggestions("search-status", matches.length, () => !$("search-autocomplete").hidden);
   if (!matches.length) {
     closeSearchSuggestions();
+    announceSuggestions("search-status", 0);
     return;
   }
   const i = targetIndex(state.python, state.platform);
@@ -1362,10 +1362,13 @@ function updateSearchAutocomplete(value) {
   const input = $("search");
   input.setAttribute("aria-expanded", "true");
   input.removeAttribute("aria-activedescendant");
+  announceSuggestions("search-status", matches.length, () => !menu.hidden);
 }
 
-// Hides the lookup's suggestions and tells assistive technology the list is gone.
+// Hides the lookup's suggestions and tells assistive technology the list is gone. A pending announcement is
+// dropped too, so clearing, submitting or picking within the pause never hears a stale "No packages match."
 function closeSearchSuggestions() {
+  clearTimeout(announceTimers["search-status"]);
   const menu = $("search-autocomplete");
   if (menu) menu.hidden = true;
   searchActive = -1;
