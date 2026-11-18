@@ -126,7 +126,8 @@ def change_note(rows: list[dict]) -> str:
     if any(r["upgrade"] for r in rows[start + 1 :]):
         return ""
     span = "in 30 nights" if start > 0 or len(rows) == 31 else f"since {rows[start]['date']}"
-    points = round(rows[-1]["percent"] - rows[start]["percent"], 1)
+    # From the one-decimal shares the table shows, so the lede and the table never differ by a rounding.
+    points = round(float(f"{rows[-1]['percent']:.1f}") - float(f"{rows[start]['percent']:.1f}"), 1)
     if points == 0:
         return f", unchanged {span}"
     return f", {'up' if points > 0 else 'down'} {abs(points):.1f} points {span}"

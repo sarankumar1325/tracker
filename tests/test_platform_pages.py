@@ -331,6 +331,13 @@ class OverTimeTests(unittest.TestCase):
         self.assertIn(", down 1.0 points since 2026-09-01.", self.build_with([night(0, 510), night(1, 500)]))
         self.assertIn(", unchanged since 2026-09-01.", self.build_with([night(0, 500), night(1, 500)]))
 
+    def test_lede_change_matches_the_shares_shown(self):
+        # 1,000 / 3,000 is 33.3% and 1,004 / 3,000 is 33.5%: the lede says 0.2, not the unrounded 0.13 rounded to 0.1.
+        page = self.build_with([night(0, 1000, packages=3000), night(1, 1004, packages=3000)])
+        self.assertIn("<td>33.3%</td>", page)
+        self.assertIn("<td>33.5%</td>", page)
+        self.assertIn(", up 0.2 points since 2026-09-01.", page)
+
     def test_upgrade_marks_rows_and_drops_the_lede_change(self):
         history = [night(i, 500 + i, wheelgap="0.12.0" if i < 5 else "0.13.0") for i in range(8)]
         page = self.build_with(history)
