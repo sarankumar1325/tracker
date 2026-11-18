@@ -517,7 +517,7 @@ button, input, select {
 .tabs button:hover {
   color: var(--text);
 }
-.tabs button[aria-selected="true"] {
+.tabs button[aria-checked="true"] {
   background: var(--navy);
   color: #ffffff;
   box-shadow: var(--shadow-sm);
