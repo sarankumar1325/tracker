@@ -162,7 +162,8 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
     index_rows.sort(key=lambda row: (row[3] / total if total else 0.0, row[0]))
     if index_rows:
         worst = index_rows[0]
-        lede = f"{worst[0]} has the fewest wheels: {worst[4]}% of the top {total:,} on Python {worst[2]}."
+        counting = ", counting Pyodide builds" if worst[1] == "pyodide" else ""  # its share counts `bundled`
+        lede = f"{worst[0]} has the fewest wheels: {worst[4]}% of the top {total:,} on Python {worst[2]}{counting}."
     else:
         lede = "The most-downloaded PyPI packages without a wheel, one page per platform."
     main = _page(

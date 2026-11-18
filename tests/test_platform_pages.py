@@ -207,6 +207,17 @@ class PlatformPageTests(unittest.TestCase):
         self.assertEqual(by_platform["win-arm64"][2:], ("3.15", "0.0%", "3"))
         self.assertEqual(by_platform["linux-x86_64"][2:], ("3.15", "100.0%", "0"))
 
+    def test_index_description_says_when_the_worst_share_counts_pyodide_builds(self):
+        # With Windows ARM64 fully covered, Pyodide (2/3, one of them `bundled`) is the worst.
+        for package in self.scan["packages"]:
+            package["results"][0] = package["results"][3] = "wheel"
+        self.run_build()
+        root = (self.site / "platforms" / "index.html").read_text(encoding="utf-8")
+        description = re.search(r'<meta name="description" content="([^"]*)">', root).group(1)
+        self.assertEqual(
+            description, "Pyodide has the fewest wheels: 66.7% of the top 3 on Python 3.14, counting Pyodide builds."
+        )
+
     def test_index_rows_match_each_platform_page(self):
         self.run_build()
         root = (self.site / "platforms" / "index.html").read_text(encoding="utf-8")
