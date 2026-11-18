@@ -1101,8 +1101,43 @@ function exportJSON() {
   document.body.removeChild(a);
 }
 
+// Dialog keyboard navigation. Query on each Tab so asynchronously loaded drawer
+// links participate, while hidden and disabled controls do not.
+function trapTab(container, event) {
+  if (event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey) return;
+  const focusable = [...container.querySelectorAll(
+    'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]'
+  )].filter((node) => node.tabIndex >= 0 && node.getClientRects().length);
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+let exportReturnFocus = null;
+
+function openExport() {
+  if ($("export-backdrop").hidden) exportReturnFocus = document.activeElement;
+  $("export-backdrop").hidden = false;
+  $("btn-export-csv").focus();
+}
+
+function closeExport() {
+  $("export-backdrop").hidden = true;
+  exportReturnFocus?.focus?.();
+  exportReturnFocus = null;
+}
+
 // Command Palette (Cmd+K)
+let commandReturnFocus = null;
+
 function openCommandPalette() {
+  if ($("cmd-overlay").hidden) commandReturnFocus = document.activeElement;
   $("cmd-overlay").hidden = false;
   $("cmd-input").value = "";
   $("cmd-input").focus();
@@ -1111,6 +1146,8 @@ function openCommandPalette() {
 
 function closeCommandPalette() {
   $("cmd-overlay").hidden = true;
+  commandReturnFocus?.focus?.();
+  commandReturnFocus = null;
 }
 
 function renderCmdResults(query) {
@@ -1635,7 +1672,6 @@ async function main() {
     } else if (e.key === "Enter") {
       e.preventDefault();
       closeCommandPalette();
-      $("cmd-trigger")?.focus();
       openDrawer(items[at].dataset.pkg);
     }
   });
@@ -1643,7 +1679,6 @@ async function main() {
     const item = e.target.closest(".cmd-result-item");
     if (!item) return;
     closeCommandPalette();
-    $("cmd-trigger")?.focus();
     openDrawer(item.dataset.pkg);
   });
 
@@ -1659,29 +1694,30 @@ async function main() {
     } else if (e.key === "Escape") {
       if (!$("cmd-overlay")?.hidden) closeCommandPalette();
       if (!$("drawer")?.hidden) closeDrawer();
-      if (!$("export-backdrop")?.hidden) $("export-backdrop").hidden = true;
+      if (!$("export-backdrop")?.hidden) closeExport();
       if ($("search-autocomplete")) $("search-autocomplete").hidden = true;
     }
   });
 
   // Export Modal
-  $("export-btn")?.addEventListener("click", () => {
-    $("export-backdrop").hidden = false;
-  });
-  $("export-close")?.addEventListener("click", () => {
-    $("export-backdrop").hidden = true;
-  });
+  $("export-btn")?.addEventListener("click", openExport);
+  $("export-close")?.addEventListener("click", closeExport);
   $("export-backdrop")?.addEventListener("click", (e) => {
-    if (e.target === $("export-backdrop")) $("export-backdrop").hidden = true;
+    if (e.target === $("export-backdrop")) closeExport();
   });
   $("btn-export-csv")?.addEventListener("click", () => {
     exportCSV();
-    $("export-backdrop").hidden = true;
+    closeExport();
   });
   $("btn-export-json")?.addEventListener("click", () => {
     exportJSON();
-    $("export-backdrop").hidden = true;
+    closeExport();
   });
+  $("export-full-csv")?.addEventListener("click", closeExport);
+
+  for (const id of ["cmd-overlay", "drawer", "export-backdrop"]) {
+    $(id)?.addEventListener("keydown", (event) => trapTab($(id), event));
+  }
 
   // CTA Copy
   $("cta-copy-btn")?.addEventListener("click", async () => {

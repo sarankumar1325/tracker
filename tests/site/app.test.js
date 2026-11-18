@@ -260,6 +260,103 @@ async function loadPage(hash, packageData = null, gapWheelIndex = null, setup = 
 const coverage = () => JSON.parse(fs.readFileSync(path.join(ROOT, "data", "coverage.json"), "utf8"));
 const cardClick = (platform) => ({ target: { closest: (sel) => (sel === ".leaderboard-card" ? { dataset: { pl: platform } } : null) } });
 
+async function loadDialogPage() {
+  return loadPage("", null, null, (context, get) => {
+    const focusable = (id) => {
+      const node = get(id);
+      node.focus = () => { context.document.activeElement = node; };
+      node.getClientRects = () => [{}];
+      node.tabIndex = 0;
+      return node;
+    };
+    for (const [id, children] of [
+      ["cmd-overlay", ["cmd-input", "cmd-close"]],
+      ["drawer", ["drawer-close", "drawer-link"]],
+      ["export-backdrop", ["export-close", "btn-export-csv", "btn-export-json", "export-full-csv"]],
+    ]) {
+      get(id).hidden = true;
+      const nodes = children.map(focusable);
+      get(id).querySelectorAll = () => nodes;
+    }
+    focusable("original-trigger").focus();
+    context.document.handlers = {};
+    context.document.addEventListener = (type, fn) => { context.document.handlers[type] = fn; };
+    context.document.createElement = () => ({ ...element(), click() {} });
+  });
+}
+
+for (const close of ["button", "backdrop", "Escape", "csv", "json", "full-csv"]) {
+  test(`export dialog restores the opener after ${close}`, async () => {
+    const { get, context } = await loadDialogPage();
+    get("export-btn").handlers.click();
+    assert.equal(get("export-backdrop").hidden, false);
+    assert.equal(context.document.activeElement, get("btn-export-csv"));
+    if (close === "button") get("export-close").handlers.click();
+    else if (close === "backdrop") get("export-backdrop").handlers.click({ target: get("export-backdrop") });
+    else if (close === "Escape") context.document.handlers.keydown({ key: "Escape" });
+    else if (close === "full-csv") get("export-full-csv").handlers.click();
+    else get(`btn-export-${close}`).handlers.click();
+    assert.equal(get("export-backdrop").hidden, true);
+    assert.equal(context.document.activeElement, get("original-trigger"));
+  });
+}
+
+for (const close of ["button", "backdrop", "Escape", "shortcut"]) {
+  test(`quick search restores the opener after ${close}`, async () => {
+    const { get, context } = await loadDialogPage();
+    context.document.handlers.keydown({ key: "k", ctrlKey: true, preventDefault() {} });
+    assert.equal(context.document.activeElement, get("cmd-input"));
+    if (close === "button") get("cmd-close").handlers.click();
+    else if (close === "backdrop") get("cmd-overlay").handlers.click({ target: get("cmd-overlay") });
+    else context.document.handlers.keydown({ key: close === "Escape" ? "Escape" : "k", ctrlKey: close === "shortcut", preventDefault() {} });
+    assert.equal(get("cmd-overlay").hidden, true);
+    assert.equal(context.document.activeElement, get("original-trigger"));
+  });
+}
+
+for (const id of ["cmd-overlay", "drawer", "export-backdrop"]) {
+  test(`${id} wraps Tab at both ends and leaves other keys alone`, async () => {
+    const { get, context } = await loadDialogPage();
+    const dialog = get(id);
+    dialog.hidden = false;
+    const nodes = [...dialog.querySelectorAll()];
+    const first = nodes[0], last = nodes.at(-1);
+    let prevented = 0;
+    const press = (key, shiftKey = false) => dialog.handlers.keydown({ key, shiftKey, preventDefault() { prevented++; } });
+    last.focus();
+    press("Tab");
+    assert.equal(context.document.activeElement, first);
+    press("Tab", true);
+    assert.equal(context.document.activeElement, last);
+    first.focus();
+    press("Tab");
+    press("ArrowRight");
+    assert.equal(prevented, 2, "native navigation between controls is preserved");
+    last.getClientRects = () => [];
+    nodes.at(-2).focus();
+    press("Tab");
+    assert.equal(context.document.activeElement, first, "hidden controls are skipped");
+  });
+}
+
+for (const select of ["click", "Enter"]) {
+  test(`quick search ${select} into drawer keeps the original return focus`, async () => {
+    const { get, context } = await loadDialogPage();
+    get("cmd-trigger").handlers.click();
+    const item = { dataset: { pkg: coverage().packages[0].name }, classList: { contains: () => true } };
+    if (select === "click") get("cmd-results").handlers.click({ target: { closest: () => item } });
+    else {
+      get("cmd-results").querySelectorAll = () => [item];
+      get("cmd-input").handlers.keydown({ key: "Enter", preventDefault() {} });
+    }
+    assert.equal(get("cmd-overlay").hidden, true);
+    assert.equal(get("drawer").hidden, false);
+    assert.equal(context.document.activeElement, get("drawer-close"));
+    get("drawer-close").handlers.click();
+    assert.equal(context.document.activeElement, get("original-trigger"));
+  });
+}
+
 async function loadTablePage() {
   let group, pills, head, headers;
   const page = await loadPage("", null, null, (context, get) => {

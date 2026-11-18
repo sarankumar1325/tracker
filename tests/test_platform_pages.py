@@ -114,6 +114,7 @@ class PlatformPageTests(unittest.TestCase):
         self.assertIn("/tracker/platforms/win-arm64/", sitemap)
         self.assertEqual(sitemap.count("<loc>https://wheelgap.github.io/tracker/platforms/win-arm64/</loc>"), 1)
         self.assertIn("default-src", win)
+        self.assertIn('<link rel="alternate" type="application/atom+xml" title="New win-arm64 wheels" href="../../new/win-arm64.xml">', win)
 
     def test_escaping(self):
         self.run_build()
