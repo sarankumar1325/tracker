@@ -1141,10 +1141,24 @@ function renderCmdResults(query) {
     .join("");
 }
 
+// The gaps table's settings a shared link carries, each only when it differs from the default in `state`.
+// Anything else in the hash is ignored; the page number is never shared, so a link opens on page 1.
+const HASH_STATUS = ["source", "missing"];
+const HASH_SORT = ["name", "status", "downloads"];
+const HASH_SIZE = ["50", "100", "all"];
+const HASH_QUERY_MAX = 100;
+
 function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (params.get("python") && pythons().includes(params.get("python"))) state.python = params.get("python");
   if (params.get("platform") && Object.hasOwn(PLATFORM_NAMES, params.get("platform"))) state.platform = params.get("platform");
+  if (HASH_STATUS.includes(params.get("status"))) state.filterStatus = params.get("status");
+  const query = (params.get("q") ?? "").trim().slice(0, HASH_QUERY_MAX);
+  if (query) state.filterQuery = query;
+  if (HASH_SORT.includes(params.get("sort"))) state.sortCol = params.get("sort");
+  if (params.get("dir") === "desc") state.sortDir = "desc";
+  if (HASH_SIZE.includes(params.get("size"))) state.pageSize = params.get("size");
+  if (params.get("compiled") === "1") state.showCompiledOnly = true;
   return params.get("package") ?? "";
 }
 
@@ -1152,7 +1166,53 @@ function writeHash() {
   const params = new URLSearchParams({ python: state.python, platform: state.platform });
   const pkg = $("search").value.trim();
   if (pkg) params.set("package", pkg);
+  if (state.filterStatus !== "all") params.set("status", state.filterStatus);
+  if (state.filterQuery) params.set("q", state.filterQuery.slice(0, HASH_QUERY_MAX));
+  if (state.sortCol !== "rank") params.set("sort", state.sortCol);
+  if (state.sortDir === "desc") params.set("dir", "desc");
+  if (String(state.pageSize) !== "25") params.set("size", String(state.pageSize));
+  if (state.showCompiledOnly) params.set("compiled", "1");
   history.replaceState(null, "", `#${params}`);
+}
+
+// Point the status pills, sort headings, universe toggle and name filter at `state`, after a hash set it.
+// (renderGaps() sets both page-size selects.)
+function markStatusPill() {
+  document.querySelectorAll(".pill-filter").forEach((b) => {
+    const selected = b.dataset.filter === state.filterStatus;
+    b.classList.toggle("active", selected);
+    b.setAttribute("aria-checked", String(selected));
+    b.tabIndex = selected ? 0 : -1;
+  });
+}
+
+function markSortHeading() {
+  document.querySelectorAll(".packages-table thead th").forEach((h) => {
+    const icon = h.querySelector(".sort-icon");
+    if (h.dataset.sort === state.sortCol) {
+      h.setAttribute("aria-sort", state.sortDir === "asc" ? "ascending" : "descending");
+      if (icon) icon.textContent = state.sortDir === "asc" ? "▲" : "▼";
+    } else {
+      h.removeAttribute("aria-sort");
+      if (icon) icon.textContent = "⇅";
+    }
+  });
+}
+
+function markUniverse() {
+  const all = $("btn-show-all");
+  const compiled = $("btn-show-compiled");
+  all?.classList.toggle("active", !state.showCompiledOnly);
+  all?.setAttribute("aria-pressed", String(!state.showCompiledOnly));
+  compiled?.classList.toggle("active", state.showCompiledOnly);
+  compiled?.setAttribute("aria-pressed", String(state.showCompiledOnly));
+}
+
+function syncGapsControls() {
+  markStatusPill();
+  markSortHeading();
+  markUniverse();
+  if ($("gaps-search")) $("gaps-search").value = state.filterQuery;
 }
 
 function renderAll() {
@@ -1255,6 +1315,7 @@ async function main() {
 
   const pkg = readHash();
   if (pkg) $("search").value = pkg;
+  syncGapsControls();
 
   renderKPIs();
   renderMeta();
@@ -1330,37 +1391,29 @@ async function main() {
 
   // Universe toggles (All 5,000 packages vs 953 Compiled Only)
   $("btn-show-all")?.addEventListener("click", () => {
-    $("btn-show-all").classList.add("active");
-    $("btn-show-all").setAttribute("aria-pressed", "true");
-    $("btn-show-compiled").classList.remove("active");
-    $("btn-show-compiled").setAttribute("aria-pressed", "false");
     state.showCompiledOnly = false;
+    markUniverse();
     renderLeaderboard();
     renderTrends();
+    writeHash();
   });
   $("btn-show-compiled")?.addEventListener("click", () => {
-    $("btn-show-compiled").classList.add("active");
-    $("btn-show-compiled").setAttribute("aria-pressed", "true");
-    $("btn-show-all").classList.remove("active");
-    $("btn-show-all").setAttribute("aria-pressed", "false");
     state.showCompiledOnly = true;
+    markUniverse();
     renderLeaderboard();
     renderTrends();
+    writeHash();
   });
 
   // Table filters
   const statusFilters = document.querySelector(".status-filter-pills");
   const selectStatus = (btn) => {
-    document.querySelectorAll(".pill-filter").forEach((b) => {
-      const selected = b === btn;
-      b.classList.toggle("active", selected);
-      b.setAttribute("aria-checked", String(selected));
-      b.tabIndex = selected ? 0 : -1;
-    });
-    btn.focus();
     state.filterStatus = btn.dataset.filter;
+    markStatusPill();
+    btn.focus();
     state.currentPage = 1;
     renderGaps();
+    writeHash();
   };
   statusFilters?.addEventListener("click", (e) => {
     const btn = e.target.closest(".pill-filter");
@@ -1381,6 +1434,7 @@ async function main() {
     state.filterQuery = e.target.value.trim();
     state.currentPage = 1;
     renderGaps();
+    writeHash();
   });
 
   // Table sorting
@@ -1394,16 +1448,10 @@ async function main() {
       state.sortCol = col;
       state.sortDir = col === "downloads" ? "desc" : "asc";
     }
-    document.querySelectorAll(".packages-table thead th").forEach((h) => {
-      h.removeAttribute("aria-sort");
-      const icon = h.querySelector(".sort-icon");
-      if (icon) icon.textContent = "⇅";
-    });
-    th.setAttribute("aria-sort", state.sortDir === "asc" ? "ascending" : "descending");
-    const icon = th.querySelector(".sort-icon");
-    if (icon) icon.textContent = state.sortDir === "asc" ? "▲" : "▼";
+    markSortHeading();
     state.currentPage = 1;
     renderGaps();
+    writeHash();
   });
 
   // Pagination click delegators (Top & Bottom)
@@ -1425,6 +1473,7 @@ async function main() {
     state.pageSize = val;
     state.currentPage = 1;
     renderGaps();
+    writeHash();
   };
   $("page-size-top")?.addEventListener("change", handlePageSizeChange);
   $("page-size-bottom")?.addEventListener("change", handlePageSizeChange);

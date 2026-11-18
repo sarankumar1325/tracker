@@ -260,9 +260,9 @@ async function loadPage(hash, packageData = null, gapWheelIndex = null, setup = 
 const coverage = () => JSON.parse(fs.readFileSync(path.join(ROOT, "data", "coverage.json"), "utf8"));
 const cardClick = (platform) => ({ target: { closest: (sel) => (sel === ".leaderboard-card" ? { dataset: { pl: platform } } : null) } });
 
-async function loadTablePage() {
+async function loadTablePage(hash = "") {
   let group, pills, head, headers;
-  const page = await loadPage("", null, null, (context, get) => {
+  const page = await loadPage(hash, null, null, (context, get) => {
     const attributes = (node) => {
       const attrs = new Map();
       node.setAttribute = (name, value) => attrs.set(name, String(value));
@@ -686,4 +686,65 @@ test("the blockers card never renders a hostile name from blockers.json (#93)", 
   assert.doesNotMatch(html, /<img|<script|onerror/);
   assert.match(html, /ok-pkg/);
   assert.match(html, /e\.g\. <a href="p\/fine\/"/);
+});
+
+test("the gaps table's filter, sort and page size come from the shareable URL (#149)", async () => {
+  const page = await loadTablePage("#platform=win-arm64&status=missing&sort=downloads&dir=desc&size=all&q=a&compiled=1");
+  const i = vm.runInContext("targetIndex(state.python, state.platform)", page.context);
+  const rows = vm.runInContext("currentGapsList()", page.context);
+  assert.ok(rows.length > 1);
+  assert.ok(rows.every((row) => row.results[i] === "missing" && row.name.toLowerCase().includes("a")));
+  const counts = Array.from(rows, (row) => row.downloads ?? 0);
+  assert.deepEqual(counts, [...counts].sort((a, b) => b - a));
+  assert.equal(page.pills.find((p) => p.dataset.filter === "missing").getAttribute("aria-checked"), "true");
+  assert.equal(page.pills.find((p) => p.dataset.filter === "all").getAttribute("aria-checked"), "false");
+  const downloads = page.headers.find((h) => h.dataset.sort === "downloads");
+  assert.equal(downloads.getAttribute("aria-sort"), "descending");
+  assert.equal(downloads.icon.textContent, "▼");
+  assert.equal(page.headers.find((h) => h.dataset.sort === "rank").getAttribute("aria-sort"), null);
+  assert.equal(page.get("page-size-top").value, "all");
+  assert.equal(page.get("page-size-bottom").value, "all");
+  assert.equal(page.get("gaps-search").value, "a");
+  assert.equal(vm.runInContext("state.showCompiledOnly", page.context), true);
+  const n = rows.length.toLocaleString("en-US");
+  assert.equal(page.get("pagination-info-top").textContent, `Showing 1–${n} of ${n} packages`);
+  // Written back as read, in a fixed order, and without the page number.
+  vm.runInContext("state.currentPage = 3; writeHash()", page.context);
+  const params = new URLSearchParams(page.context.location.hash.slice(1));
+  assert.deepEqual([...params.keys()], ["python", "platform", "status", "q", "sort", "dir", "size", "compiled"]);
+  assert.equal(params.get("status"), "missing");
+  assert.equal(params.get("size"), "all");
+});
+
+test("a plain link stays short, and unknown gaps table values in the URL are ignored (#149)", async () => {
+  const page = await loadTablePage(`#platform=win-arm64&status=<script>&sort=evil&dir=up&size=7&compiled=yes&page=4&extra=1&q=${"x".repeat(150)}`);
+  assert.equal(vm.runInContext("state.filterStatus", page.context), "all");
+  assert.equal(vm.runInContext("state.sortCol", page.context), "rank");
+  assert.equal(vm.runInContext("state.sortDir", page.context), "asc");
+  assert.equal(String(vm.runInContext("state.pageSize", page.context)), "25");
+  assert.equal(vm.runInContext("state.showCompiledOnly", page.context), false);
+  assert.equal(vm.runInContext("state.currentPage", page.context), 1);
+  assert.equal(vm.runInContext("state.filterQuery", page.context).length, 100);
+  vm.runInContext("state.filterQuery = ''; writeHash()", page.context);
+  const params = new URLSearchParams(page.context.location.hash.slice(1));
+  assert.deepEqual([...params.keys()], ["python", "platform"]);
+  assert.equal(params.get("platform"), "win-arm64");
+});
+
+test("changing the gaps table's status, sort or page size updates the URL (#149)", async () => {
+  const page = await loadTablePage("#platform=win-arm64");
+  const pill = page.pills.find((p) => p.dataset.filter === "source");
+  page.group.handlers.click({ target: pill });
+  assert.equal(new URLSearchParams(page.context.location.hash.slice(1)).get("status"), "source");
+  const name = page.headers.find((h) => h.dataset.sort === "name");
+  const click = { target: { closest: (selector) => selector === "th.sortable" ? name : null } };
+  page.head.handlers.click(click);
+  page.head.handlers.click(click);
+  let params = new URLSearchParams(page.context.location.hash.slice(1));
+  assert.equal(params.get("sort"), "name");
+  assert.equal(params.get("dir"), "desc");
+  page.get("page-size-top").handlers.change({ target: { value: "100" } });
+  params = new URLSearchParams(page.context.location.hash.slice(1));
+  assert.equal(params.get("size"), "100");
+  assert.equal(params.has("page"), false);
 });
