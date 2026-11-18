@@ -215,7 +215,8 @@ class PlatformPageTests(unittest.TestCase):
         root = (self.site / "platforms" / "index.html").read_text(encoding="utf-8")
         description = re.search(r'<meta name="description" content="([^"]*)">', root).group(1)
         self.assertEqual(
-            description, "Pyodide has the fewest wheels: 66.7% of the top 3 on Python 3.14, counting Pyodide builds."
+            description,
+            "Pyodide (browser) has the fewest wheels: 66.7% of the top 3 on Python 3.14, counting Pyodide builds.",
         )
 
     def test_index_rows_match_each_platform_page(self):
