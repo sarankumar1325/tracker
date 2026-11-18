@@ -24,18 +24,27 @@ KEEP_DAYS = 90
 INSTALLABLE = ("wheel", "bundled")
 
 
-DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
-def read_changes(path: Path) -> list[dict]:
+class Malformed(ValueError):
+    """read_changes(strict=True) found a changes.json it couldn't fully use."""
+
+
+def read_changes(path: Path, *, strict: bool = False) -> list[dict]:
     """changes.json's days, keeping only well-formed ones, for the publish step.
 
     The file is written by the scan job, so a half-written or odd one warns and is read as far as
     it's usable rather than stopping the deploy: a missing file is [], a file that isn't valid JSON
     or isn't a list is [] with a warning, and otherwise a day is kept when it's a dict with a
     YYYY-MM-DD `date` and `gained`/`lost` lists, and within those only dicts with string `name`,
-    `version` and `target`. One warning says how many days and items were dropped."""
-    data = _read_json_list(path)
+    `version` and `target`. One warning says how many days and items were dropped.
+
+    strict=True raises Malformed instead of warning and dropping, for a caller that writes data
+    from the result (build_campaigns.record_baselines freezes baselines from it). This script's own
+    update() still reads the file as it is: it writes the file back, so it must never drop entries.
+    """
+    data, problem = _read_json_list(path)
     days: list[dict] = []
     dropped = 0
     for day in data:
@@ -55,7 +64,8 @@ def read_changes(path: Path) -> list[dict]:
             kept[kind] = items
         days.append(kept)
     if dropped:
-        print(f"::warning::{path}: left out {dropped} malformed day(s) or item(s)")
+        problem = f"left out {dropped} malformed day(s) or item(s)"
+    _report(path, problem, strict)
     return days
 
 
@@ -63,20 +73,29 @@ def _change_item_ok(item: object) -> bool:
     return isinstance(item, dict) and all(isinstance(item.get(k), str) for k in ("name", "version", "target"))
 
 
-def _read_json_list(path: Path) -> list:
-    """The JSON list in path: [] for a missing file, and [] with a warning for one that can't be
-    read, isn't valid JSON, or isn't a list."""
+def _read_json_list(path: Path) -> tuple[list, str | None]:
+    """The JSON list in path, and what's wrong with the file if anything: [] for a missing file
+    (not a problem), and [] with the problem for one that can't be read, isn't valid JSON, or
+    isn't a list."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return []
+        return [], None
     except (OSError, ValueError, RecursionError) as e:
-        print(f"::warning::{path} isn't readable JSON ({type(e).__name__}), so it's read as empty")
-        return []
+        return [], f"isn't readable JSON ({type(e).__name__}), so it's read as empty"
     if not isinstance(data, list):
-        print(f"::warning::{path} isn't a JSON list, so it's read as empty")
-        return []
-    return data
+        return [], "isn't a JSON list, so it's read as empty"
+    return data, None
+
+
+def _report(path: Path, problem: str | None, strict: bool) -> None:
+    """A ::warning:: in the job log for a file read_changes or read_history couldn't fully use, or
+    with strict, Malformed."""
+    if problem is None:
+        return
+    if strict:
+        raise Malformed(f"{path}: {problem}")
+    print(f"::warning::{path}: {problem}")
 
 
 def counts(frm: str, to: str) -> bool:

@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import build_campaigns, build_pages, update_history
+from scripts import build_campaigns, build_pages, update_changes, update_history
 
 
 CONFIG = """
@@ -1029,12 +1029,40 @@ class MalformedHistoryAndChangesTests(unittest.TestCase):
             self.assertEqual(build_campaigns.build(self.coverage, self.history, self.changes, self.config, self.site), 1)
         self.assertEqual(out.getvalue().count("::warning::"), 2)
 
-    def test_record_baselines_survives_malformed_changes(self):
+    def test_record_baselines_refuses_malformed_changes(self):
+        # A baseline is frozen for good, so unlike the page build the recorder doesn't drop what it
+        # can't read: it records nothing (scan.yml warns) and the next scan tries again.
         self.recordable()
-        self.changes.write_text('[{"date": "2026-11-17", "gained": null, "lost": []}]', encoding="utf-8")
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            build_campaigns.record_baselines(self.coverage, self.changes, self.config, self.root / "baselines", log=lambda m: None)
-        self.assertIn("::warning::", out.getvalue())
+        out = self.root / "baselines"
+        for text in ('[{"date": "2026-11-17", "gained": null, "lost": []}]', "[{", '{"x": 1}'):
+            with self.subTest(text=text):
+                self.changes.write_text(text, encoding="utf-8")
+                with self.assertRaises(update_changes.Malformed):
+                    build_campaigns.record_baselines(self.coverage, self.changes, self.config, out, log=lambda m: None)
+                self.assertFalse(out.exists())
+
+    def test_record_baselines_ignores_malformed_changes_when_nothing_is_due(self):
+        self.recordable()
+        out = self.root / "baselines"
+
+        def record():
+            return build_campaigns.record_baselines(self.coverage, self.changes, self.config, out)
+
+        self.assertEqual(record(), ["musl-aarch64"])
+        self.changes.write_text("[{", encoding="utf-8")
+        self.assertEqual(record(), [])
+
+    def test_record_baselines_cli_exits_nonzero_on_malformed_changes(self):
+        self.recordable()
+        self.changes.write_text("[{", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(Path(build_campaigns.__file__)), "--record-baselines",
+             str(self.coverage), str(self.changes), str(self.config), str(self.root / "baselines")],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not recording baselines", result.stderr)
+        self.assertFalse((self.root / "baselines").exists())
 
     def test_read_history_keeps_good_entries_and_targets(self):
         good = {"date": "2026-11-16", "wheelgap": "0.9.0", "packages": 5, "summary": {"L": {"wheel": 4}}}

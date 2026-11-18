@@ -27,9 +27,10 @@ def read_history(path: Path) -> list[dict]:
     list is [] with a warning, and otherwise an entry is kept when it's a dict with a YYYY-MM-DD
     `date` and a dict `summary`, and within the summary only targets whose value is a dict. One
     warning says how many entries and targets were dropped."""
+    data, problem = update_changes._read_json_list(path)
     entries: list[dict] = []
     dropped = 0
-    for entry in update_changes._read_json_list(path):
+    for entry in data:
         if not (
             isinstance(entry, dict)
             and isinstance(entry.get("date"), str)
@@ -42,7 +43,8 @@ def read_history(path: Path) -> list[dict]:
         dropped += len(entry["summary"]) - len(summary)
         entries.append({**entry, "summary": summary})
     if dropped:
-        print(f"::warning::{path}: left out {dropped} malformed entr(y/ies) or target(s)")
+        problem = f"left out {dropped} malformed entr(y/ies) or target(s)"
+    update_changes._report(path, problem, strict=False)
     return entries
 
 
