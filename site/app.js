@@ -1167,14 +1167,15 @@ function showActiveOption(input, prefix, count, active) {
 
 // Says how many suggestions there are once typing pauses, in the search's own polite live region, so a
 // screen reader hears one count rather than one per keystroke. The quick search has its own region inside
-// the dialog: aria-modal hides everything outside it from assistive technology.
+// the dialog: aria-modal hides everything outside it from assistive technology. A count is dropped if the list
+// has closed by then (Enter, Escape or a click within the pause), so it never talks over what replaced it.
 const ANNOUNCE_DELAY_MS = 500;
 const announceTimers = {};
-function announceSuggestions(regionId, count) {
+function announceSuggestions(regionId, count, isOpen) {
   clearTimeout(announceTimers[regionId]);
   announceTimers[regionId] = setTimeout(() => {
     const region = $(regionId);
-    if (!region) return;
+    if (!region || (count && !isOpen())) return;
     region.textContent = count ? `${count} suggestion${count === 1 ? "" : "s"}. Use Up and Down to choose.` : "No packages match.";
   }, ANNOUNCE_DELAY_MS);
 }
@@ -1212,7 +1213,7 @@ function renderCmdResults(query) {
   cmdActive = matches.length ? 0 : -1;
   const input = $("cmd-input");
   input.setAttribute("aria-expanded", String(matches.length > 0));
-  announceSuggestions("cmd-status", matches.length);
+  announceSuggestions("cmd-status", matches.length, () => !$("cmd-overlay").hidden);
   if (!matches.length) {
     input.removeAttribute("aria-activedescendant");
     container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.86rem">No packages match "${esc(query)}".</div>`;
@@ -1343,7 +1344,7 @@ function updateSearchAutocomplete(value) {
 
   searchMatches = matches.map((p) => p.name);
   searchActive = -1;
-  announceSuggestions("search-status", matches.length);
+  announceSuggestions("search-status", matches.length, () => !$("search-autocomplete").hidden);
   if (!matches.length) {
     closeSearchSuggestions();
     return;

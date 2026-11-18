@@ -1087,6 +1087,8 @@ test("clicking a Python (or Enter/Space on it) re-renders for it and keeps focus
 // tests can follow aria-expanded, aria-activedescendant and each option's aria-selected.
 async function loadComboboxPage() {
   return loadPage("", null, null, (context) => {
+    context.document.handlers = {};
+    context.document.addEventListener = (type, fn) => { (context.document.handlers[type] ??= []).push(fn); };
     const byId = context.document.getElementById;
     context.document.getElementById = (id) => {
       const node = byId(id);
@@ -1231,4 +1233,31 @@ test("the live regions give the count once typing pauses, and say when nothing m
   typeInto(get, "cmd-input", "num");
   await settle();
   assert.match(get("cmd-status").textContent, /^\d+ suggestions?\. Use Up and Down to choose\.$/);
+});
+
+test("lookup: the global Escape and a click outside also reset the combobox state (#167)", async () => {
+  const { get, context } = await loadComboboxPage();
+  for (const id of ["cmd-overlay", "drawer", "export-backdrop"]) get(id).hidden = true; // only the lookup is open
+  for (const close of ["Escape", "click outside"]) {
+    typeInto(get, "search", "num");
+    keyOn(get, "search", "ArrowDown");
+    assert.equal(get("search").attrs["aria-activedescendant"], "search-opt-0");
+    // The page's global Escape handler, and its click-outside handler (the last document click listener).
+    if (close === "Escape") context.document.handlers.keydown.at(-1)({ key: "Escape", preventDefault() {} });
+    else context.document.handlers.click.at(-1)({ target: { closest: () => null } });
+    assert.equal(get("search-autocomplete").hidden, true, close);
+    assert.equal(get("search").attrs["aria-expanded"], "false", close);
+    assert.equal(get("search").attrs["aria-activedescendant"], undefined, close);
+  }
+});
+
+test("lookup: no count is announced once the list has closed within the pause (#167)", async () => {
+  const { get } = await loadComboboxPage();
+  const said = [];
+  Object.defineProperty(get("search-status"), "textContent", { get: () => said.at(-1) ?? "", set: (v) => said.push(v) });
+  typeInto(get, "search", "num");
+  keyOn(get, "search", "ArrowDown");
+  keyOn(get, "search", "Enter"); // picks a suggestion and closes the list before the pause ends
+  await settle();
+  assert.deepEqual(said, [], "the count would talk over the lookup result");
 });
