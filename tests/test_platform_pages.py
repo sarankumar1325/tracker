@@ -191,6 +191,38 @@ class PlatformPageTests(unittest.TestCase):
         self.assertNotIn("lab-section", self.read("linux-aarch64"))
         self.assertNotIn("lab-section", self.read("pyodide"))
 
+    def test_index_lists_platforms_by_share_lowest_first(self):
+        # Windows ARM64 0/3, Pyodide 2/3, Linux ARM64 3/3 and Linux x86_64 3/3 (tie, by name).
+        self.run_build()
+        root = (self.site / "platforms" / "index.html").read_text(encoding="utf-8")
+        rows = re.findall(r'<tr><td><a href="([^"]+)/">([^<]+)</a></td><td>([^<]+)</td><td>([^<]+)</td><td>([^<]+)</td></tr>', root)
+        self.assertEqual([r[0] for r in rows], ["win-arm64", "pyodide", "linux-aarch64", "linux-x86_64"])
+        self.assertEqual(root.count('<table class="matrix">'), 1)
+        self.assertNotIn("<ul>", root)
+        description = re.search(r'<meta name="description" content="([^"]*)">', root).group(1)
+        self.assertEqual(description, "Windows ARM64 has the fewest wheels: 0.0% of the top 3 on Python 3.15.")
+        self.assertIn(f'<p class="lede">{description}</p>', root)
+        by_platform = {r[0]: r for r in rows}
+        self.assertEqual(by_platform["pyodide"][2:], ("3.14", "66.7% (wheel or Pyodide build)", "1"))
+        self.assertEqual(by_platform["win-arm64"][2:], ("3.15", "0.0%", "3"))
+        self.assertEqual(by_platform["linux-x86_64"][2:], ("3.15", "100.0%", "0"))
+
+    def test_index_rows_match_each_platform_page(self):
+        self.run_build()
+        root = (self.site / "platforms" / "index.html").read_text(encoding="utf-8")
+        rows = re.findall(r'<tr><td><a href="([^"]+)/">[^<]+</a></td><td>([^<]+)</td><td>([0-9.]+)%', root)
+        for platform, python, percent in rows:
+            with self.subTest(platform=platform):
+                page = self.read(platform)
+                self.assertIn(f"({percent}%) have", page)
+                self.assertIn(f"for Python {python}.", page)
+
+    def test_index_leaves_out_platforms_without_a_target(self):
+        self.run_build()
+        root = (self.site / "platforms" / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("macos", root.lower().split("<main", 1)[1])
+        self.assertEqual(root.count("<tr><td>"), 4)
+
     def test_rejects_stale_most_wanted_data(self):
         self.wanted["generated"] = "2026-11-16T03:00:00+00:00"
         with self.assertRaises(SystemExit):
