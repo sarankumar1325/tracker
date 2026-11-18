@@ -1148,8 +1148,41 @@ function closeExport() {
   exportReturnFocus = null;
 }
 
+// Both package searches follow the WAI-ARIA combobox pattern with list autocomplete (#167): focus stays in the
+// input, aria-activedescendant names the highlighted option, and option ids come from the index, not the name.
+function showActiveOption(input, prefix, count, active) {
+  for (let k = 0; k < count; k++) {
+    const opt = $(`${prefix}-${k}`);
+    if (!opt) continue;
+    opt.setAttribute("aria-selected", String(k === active));
+    opt.classList.toggle("selected", k === active);
+  }
+  if (active >= 0) {
+    input.setAttribute("aria-activedescendant", `${prefix}-${active}`);
+    $(`${prefix}-${active}`)?.scrollIntoView?.({ block: "nearest" });
+  } else {
+    input.removeAttribute("aria-activedescendant");
+  }
+}
+
+// Says how many suggestions there are once typing pauses, in the search's own polite live region, so a
+// screen reader hears one count rather than one per keystroke. The quick search has its own region inside
+// the dialog: aria-modal hides everything outside it from assistive technology.
+const ANNOUNCE_DELAY_MS = 500;
+const announceTimers = {};
+function announceSuggestions(regionId, count) {
+  clearTimeout(announceTimers[regionId]);
+  announceTimers[regionId] = setTimeout(() => {
+    const region = $(regionId);
+    if (!region) return;
+    region.textContent = count ? `${count} suggestion${count === 1 ? "" : "s"}. Use Up and Down to choose.` : "No packages match.";
+  }, ANNOUNCE_DELAY_MS);
+}
+
 // Command Palette (Cmd+K)
 let commandReturnFocus = null;
+let cmdMatches = []; // names of the quick search's results, in order
+let cmdActive = -1; // index of the highlighted one
 
 function openCommandPalette() {
   if ($("cmd-overlay").hidden) commandReturnFocus = document.activeElement;
@@ -1175,7 +1208,13 @@ function renderCmdResults(query) {
     matches = state.data.packages.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 12);
   }
 
+  cmdMatches = matches.map((p) => p.name);
+  cmdActive = matches.length ? 0 : -1;
+  const input = $("cmd-input");
+  input.setAttribute("aria-expanded", String(matches.length > 0));
+  announceSuggestions("cmd-status", matches.length);
   if (!matches.length) {
+    input.removeAttribute("aria-activedescendant");
     container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.86rem">No packages match "${esc(query)}".</div>`;
     return;
   }
@@ -1184,13 +1223,14 @@ function renderCmdResults(query) {
   container.innerHTML = matches
     .map((p, idx) => {
       const s = i >= 0 ? p.results[i] : "unknown";
-      return `<div class="cmd-result-item ${idx === 0 ? "selected" : ""}" data-pkg="${esc(p.name)}" role="option">
+      return `<div class="cmd-result-item ${idx === 0 ? "selected" : ""}" id="cmd-opt-${idx}" data-pkg="${esc(p.name)}" role="option" aria-selected="${idx === 0}">
         <span class="cmd-res-rank">#${esc(p.rank)}</span>
         <span class="cmd-res-name">${esc(p.name)} <small style="color:var(--text-faint)">${esc(p.version ?? "")}</small></span>
         ${statusBadge(s)}
       </div>`;
     })
     .join("");
+  input.setAttribute("aria-activedescendant", "cmd-opt-0");
 }
 
 // The gaps table's settings a shared link carries, each only when it differs from the default in `state`.
@@ -1280,12 +1320,14 @@ function renderAll() {
 }
 
 // Autocomplete Menu for Look Up input (top 8 matches, lightweight & fast)
+let searchMatches = []; // names of the lookup's suggestions, in order
+let searchActive = -1; // index of the highlighted one; none until Up or Down, so Enter still submits what was typed
 function updateSearchAutocomplete(value) {
   const menu = $("search-autocomplete");
   if (!menu) return;
   const q = value.trim().toLowerCase();
   if (!q || q.length < 1) {
-    menu.hidden = true;
+    closeSearchSuggestions();
     return;
   }
   const matches = state.data.packages
@@ -1299,20 +1341,35 @@ function updateSearchAutocomplete(value) {
     })
     .slice(0, 8);
 
+  searchMatches = matches.map((p) => p.name);
+  searchActive = -1;
+  announceSuggestions("search-status", matches.length);
   if (!matches.length) {
-    menu.hidden = true;
+    closeSearchSuggestions();
     return;
   }
   const i = targetIndex(state.python, state.platform);
   menu.innerHTML = matches
     .map(
-      (p) => `<div class="autocomplete-item" data-name="${esc(p.name)}" role="button" tabindex="0">
+      (p, idx) => `<div class="autocomplete-item" id="search-opt-${idx}" data-name="${esc(p.name)}" role="option" aria-selected="false">
       <span class="autocomplete-name">${esc(p.name)} <small style="color:var(--text-faint)">${esc(p.version ?? "")}</small></span>
       <span>${statusBadge(i >= 0 ? p.results[i] : "unknown")}</span>
     </div>`
     )
     .join("");
   menu.hidden = false;
+  const input = $("search");
+  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-activedescendant");
+}
+
+// Hides the lookup's suggestions and tells assistive technology the list is gone.
+function closeSearchSuggestions() {
+  const menu = $("search-autocomplete");
+  if (menu) menu.hidden = true;
+  searchActive = -1;
+  $("search").setAttribute("aria-expanded", "false");
+  $("search").removeAttribute("aria-activedescendant");
 }
 
 // Theme management
@@ -1626,7 +1683,7 @@ async function main() {
     $("search").value = "";
     $("search").focus();
     updateClearBtn();
-    if ($("search-autocomplete")) $("search-autocomplete").hidden = true;
+    closeSearchSuggestions();
     renderOmniAnswer();
     renderLookup("");
     writeHash();
@@ -1652,7 +1709,7 @@ async function main() {
   // Search form & Autocomplete
   $("search-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    if ($("search-autocomplete")) $("search-autocomplete").hidden = true;
+    closeSearchSuggestions();
     renderOmniAnswer();
     renderLookup($("search").value);
     writeHash();
@@ -1670,36 +1727,39 @@ async function main() {
     }
   });
 
-  $("search-autocomplete")?.addEventListener("keydown", (e) => {
-    const item = e.target.closest(".autocomplete-item");
-    if (!item) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      item.click();
-    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const sib = e.key === "ArrowDown" ? item.nextElementSibling : item.previousElementSibling;
-      (sib ?? (e.key === "ArrowUp" ? $("search") : null))?.focus();
-    }
-  });
   $("search").addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown" && !$("search-autocomplete")?.hidden) {
-      const first = $("search-autocomplete").querySelector(".autocomplete-item");
-      if (first) {
-        e.preventDefault();
-        first.focus();
+    const menu = $("search-autocomplete");
+    if (!menu) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      e.preventDefault();
+      if (menu.hidden) {
+        updateSearchAutocomplete(e.target.value);
+        if (menu.hidden) return;
       }
+      const n = searchMatches.length;
+      if (e.key === "ArrowDown") searchActive = (searchActive + 1) % n;
+      else searchActive = searchActive <= 0 ? n - 1 : searchActive - 1;
+      showActiveOption($("search"), "search-opt", n, searchActive);
+    } else if (e.key === "Enter" && !menu.hidden && searchActive >= 0) {
+      e.preventDefault(); // picks the highlighted suggestion; with none, Enter submits the form as before
+      pickSearchSuggestion(searchMatches[searchActive]);
+    } else if (e.key === "Escape" && !menu.hidden) {
+      closeSearchSuggestions();
     }
   });
+  function pickSearchSuggestion(name) {
+    $("search").value = name;
+    updateClearBtn();
+    closeSearchSuggestions();
+    renderOmniAnswer();
+    renderLookup(name);
+    writeHash();
+  }
   $("search-autocomplete")?.addEventListener("click", (e) => {
     const item = e.target.closest(".autocomplete-item");
     if (!item) return;
-    $("search").value = item.dataset.name;
-    updateClearBtn();
-    $("search-autocomplete").hidden = true;
-    renderOmniAnswer();
-    renderLookup(item.dataset.name);
-    writeHash();
+    pickSearchSuggestion(item.dataset.name);
   });
 
   // Omni Checker Clear All & Reset
@@ -1710,7 +1770,7 @@ async function main() {
     state.currentPage = 1;
     populateOmniSelects();
     updateClearBtn();
-    if ($("search-autocomplete")) $("search-autocomplete").hidden = true;
+    closeSearchSuggestions();
     renderAll();
     renderLookup("");
     writeHash();
@@ -1718,9 +1778,7 @@ async function main() {
 
   // Close search autocomplete on click outside
   document.addEventListener("click", (e) => {
-    if ($("search-autocomplete") && !e.target.closest(".autocomplete-wrapper")) {
-      $("search-autocomplete").hidden = true;
-    }
+    if ($("search-autocomplete") && !e.target.closest(".autocomplete-wrapper")) closeSearchSuggestions();
   });
 
   // Command Palette
@@ -1733,19 +1791,16 @@ async function main() {
     renderCmdResults(e.target.value);
   });
   $("cmd-input")?.addEventListener("keydown", (e) => {
-    const items = [...$("cmd-results").querySelectorAll(".cmd-result-item")];
-    if (!items.length) return;
-    const at = Math.max(0, items.findIndex((x) => x.classList.contains("selected")));
+    const n = cmdMatches.length;
+    if (!n || cmdActive < 0) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      const next = (at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-      items[at].classList.remove("selected");
-      items[next].classList.add("selected");
-      items[next].scrollIntoView?.({ block: "nearest" });
+      cmdActive = (cmdActive + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+      showActiveOption($("cmd-input"), "cmd-opt", n, cmdActive);
     } else if (e.key === "Enter") {
       e.preventDefault();
       closeCommandPalette();
-      openDrawer(items[at].dataset.pkg);
+      openDrawer(cmdMatches[cmdActive]);
     }
   });
   $("cmd-results")?.addEventListener("click", (e) => {
@@ -1768,7 +1823,7 @@ async function main() {
       if (!$("cmd-overlay")?.hidden) closeCommandPalette();
       if (!$("drawer")?.hidden) closeDrawer();
       if (!$("export-backdrop")?.hidden) closeExport();
-      if ($("search-autocomplete")) $("search-autocomplete").hidden = true;
+      closeSearchSuggestions();
     }
   });
 
