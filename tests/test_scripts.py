@@ -173,17 +173,23 @@ class CheckScanTests(unittest.TestCase):
     def test_summary_that_disagrees_with_the_packages(self):
         data = scan()
         data["summary"][LABELS[1]]["wheel"] = 4
-        self.assertEqual(check_scan.problems(data, [], top=3), [f"{LABELS[1]}: summary says 4 wheel, the packages have 1"])
+        self.assertEqual(check_scan.problems(data, [], top=3), [
+            f"{LABELS[1]}: summary says 4 wheel, the packages have 1"
+        ])
 
     def test_summary_kind_the_packages_do_not_have(self):
         data = scan()
         data["summary"][LABELS[0]]["missing"] = 2
-        self.assertEqual(check_scan.problems(data, [], top=3), [f"{LABELS[0]}: summary says 2 missing, the packages have 0"])
+        self.assertEqual(check_scan.problems(data, [], top=3), [
+            f"{LABELS[0]}: summary says 2 missing, the packages have 0"
+        ])
 
     def test_result_missing_from_the_summary_counts_as_zero(self):
         data = scan()
         del data["summary"][LABELS[1]]["source"]
-        self.assertEqual(check_scan.problems(data, [], top=3), [f"{LABELS[1]}: summary says 0 source, the packages have 2"])
+        self.assertEqual(check_scan.problems(data, [], top=3), [
+            f"{LABELS[1]}: summary says 0 source, the packages have 2"
+        ])
 
     def test_zero_counts_in_the_summary_are_fine(self):
         data = scan()
@@ -201,6 +207,16 @@ class CheckScanTests(unittest.TestCase):
             with self.subTest(generated=generated):
                 found = check_scan.problems(scan(generated=generated), [], top=3)
                 self.assertEqual(found, [f"generated {generated!r} isn't an ISO 8601 timestamp"])
+
+    def test_generated_that_does_not_start_with_its_date(self):
+        # fromisoformat accepts these, but update_history.py would date the night by their first 10 characters.
+        for generated in ("20261110T032000Z", "2026-W46-2T03:20:00"):
+            with self.subTest(generated=generated):
+                found = check_scan.problems(scan(generated=generated), [], top=3)
+                self.assertEqual(found, [f"generated {generated!r} doesn't start with its date as YYYY-MM-DD"])
+        for generated in ("2026-11-10T03:20:00Z", "2026-11-10 03:20:00+00:00", "2026-11-10"):
+            with self.subTest(generated=generated):
+                self.assertEqual(check_scan.problems(scan(generated=generated), [], top=3), [])
 
     def test_generated_before_the_last_history_entry(self):
         history = [{"date": "2026-11-11", "summary": {}}]

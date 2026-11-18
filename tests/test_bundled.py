@@ -216,7 +216,10 @@ class CheckScanTests(Repo):
 
     def test_a_large_drop_in_bundled_is_flagged_like_wheels(self):
         # The summary matches the packages (check_scan compares them), so the history sets the drop: 1 bundled now.
-        data = scan([package("numpy", ["wheel", "source", "bundled"]), package("pyyaml", ["wheel", "source", "source"], rank=2)])
+        data = scan([
+            package("numpy", ["wheel", "source", "bundled"]),
+            package("pyyaml", ["wheel", "source", "source"], rank=2),
+        ])
         history = [{"date": "2026-11-12", "summary": {"3.14 pyodide": {"bundled": 2}}}]
         self.assertEqual(self.problems(data, history), [
             "3.14 pyodide: bundled fell from 2 to 1 (if that's real, run the workflow by hand with allow_drop)"

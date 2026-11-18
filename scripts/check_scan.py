@@ -92,13 +92,18 @@ def consistency_problems(scan: dict) -> list[str]:
 
 
 def generated_problems(scan: dict, history: list[dict]) -> list[str]:
-    """update_history.py and update_changes.py date the night by generated[:10], so it must parse
-    and mustn't be before the last history entry (the same day is fine: it replaces that entry)."""
+    """update_history.py and update_changes.py date the night by generated[:10], so it must parse,
+    start with that date, and mustn't be before the last history entry (the same day is fine: it
+    replaces that entry)."""
     generated = scan.get("generated")
     try:
         when = datetime.fromisoformat(generated)
     except (TypeError, ValueError):
         return [f"generated {generated!r} isn't an ISO 8601 timestamp"]
+    # fromisoformat also takes forms like 20261117T035000Z or 2026-W47-1, whose first 10 characters
+    # aren't the date the history would be given.
+    if generated[:10] != when.date().isoformat():
+        return [f"generated {generated!r} doesn't start with its date as YYYY-MM-DD"]
     last = history[-1].get("date") if history and isinstance(history[-1], dict) else None
     if isinstance(last, str) and when.date().isoformat() < last:
         return [f"generated {generated} is before the last history entry, {last}"]
