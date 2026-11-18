@@ -186,10 +186,25 @@ function renderAgreement(a, now = Date.now()) {
   el.append(link);
 }
 
+// The Python selector is a radio group (#163): one tab stop, on the selected Python, and arrow keys move the
+// choice, like the status pills (#146).
 function renderTabs() {
   $("python-tabs").innerHTML = pythons()
-    .map((py) => `<button role="tab" aria-selected="${py === state.python}" data-python="${esc(py)}">${esc(py)}</button>`)
+    .map((py) => {
+      const on = py === state.python;
+      return `<button type="button" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}" data-python="${esc(py)}">${esc(py)}</button>`;
+    })
     .join("");
+}
+
+// Switches the page to Python py from the selector itself, then puts focus back on the selected button, which
+// renderTabs() has just replaced (otherwise focus drops to <body>).
+function selectPython(py) {
+  state.python = py;
+  state.currentPage = 1;
+  renderAll();
+  renderLookup($("search").value);
+  $("python-tabs").querySelector('button[aria-checked="true"]')?.focus();
 }
 
 // The night before the latest scan in data/history.json, or null.
@@ -1364,10 +1379,19 @@ async function main() {
   $("python-tabs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-python]");
     if (!b) return;
-    state.python = b.dataset.python;
-    state.currentPage = 1;
-    renderAll();
-    renderLookup($("search").value);
+    selectPython(b.dataset.python);
+  });
+  $("python-tabs").addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // Alt+Left still goes back, as everywhere else
+    const list = pythons();
+    const b = e.target.closest("button[data-python]");
+    const index = b ? list.indexOf(b.dataset.python) : -1;
+    if (index < 0) return;
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    const next = e.key === "Home" ? 0 : e.key === "End" ? list.length - 1 : step ? (index + step + list.length) % list.length : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    selectPython(list[next]);
   });
 
   // Platform Leaderboard card click (Ranked worst to best)

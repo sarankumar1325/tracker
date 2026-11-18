@@ -1011,3 +1011,74 @@ test("both exports write unknown for a package with no result on the target (#14
   assert.equal(csvLines[1].split(",")[3], "unknown");
   assert.equal(doc.packages[0].status, "unknown");
 });
+
+// The Python selector is a radio group that keeps focus across a switch (#163).
+async function loadTabsPage() {
+  return loadPage("", null, null, (context, get) => {
+    const tabs = get("python-tabs");
+    // Stand-in for the buttons renderTabs() writes: querySelector finds the checked one in the current markup.
+    tabs.querySelector = (selector) => {
+      assert.equal(selector, 'button[aria-checked="true"]');
+      const m = tabs.innerHTML.match(/<button[^>]*aria-checked="true"[^>]*data-python="([^"]+)"/);
+      return m ? { python: m[1], focus() { context.document.activeElement = this; } } : null;
+    };
+  });
+}
+const tabButton = (py) => ({ closest: (sel) => (sel === "button[data-python]" ? { dataset: { python: py } } : null) });
+const checkedPython = (html) => html.match(/aria-checked="true"[^>]*data-python="([^"]+)"/)[1];
+
+test("python selector is a radio group with one tab stop (#163)", async () => {
+  const html = fs.readFileSync(path.join(ROOT, "site", "index.html"), "utf8");
+  assert.match(html, /<div class="tabs" role="radiogroup" aria-label="Python version" id="python-tabs">/);
+  const { get, context } = await loadTabsPage();
+  const markup = get("python-tabs").innerHTML;
+  const buttons = markup.match(/<button[^>]*>/g);
+  assert.equal(buttons.length, context.pythons().length);
+  assert.ok(buttons.every((b) => /type="button" role="radio"/.test(b)));
+  assert.doesNotMatch(markup, /role="tab"|aria-selected/);
+  assert.equal(buttons.filter((b) => /aria-checked="true"/.test(b)).length, 1);
+  assert.equal(buttons.filter((b) => /tabindex="0"/.test(b)).length, 1);
+  assert.match(markup, /aria-checked="true" tabindex="0"/);
+  assert.equal(context.document.activeElement, undefined, "first load doesn't move focus");
+});
+
+test("arrow keys, Home and End move the Python choice and keep focus on it (#163)", async () => {
+  const { get, context } = await loadTabsPage();
+  const list = context.pythons();
+  assert.ok(list.length > 2);
+  const tabs = get("python-tabs");
+  const press = (key, extra = {}) => {
+    let prevented = false;
+    tabs.handlers.keydown({ key, target: tabButton(checkedPython(tabs.innerHTML)), preventDefault() { prevented = true; }, ...extra });
+    return prevented;
+  };
+  assert.equal(checkedPython(tabs.innerHTML), list[0]);
+  assert.ok(press("ArrowRight"));
+  assert.equal(checkedPython(tabs.innerHTML), list[1]);
+  assert.equal(context.document.activeElement.python, list[1], "focus is on the newly selected button");
+  press("ArrowLeft");
+  press("ArrowLeft"); // from the first, wraps to the last
+  assert.equal(checkedPython(tabs.innerHTML), list.at(-1));
+  assert.equal(context.document.activeElement.python, list.at(-1));
+  press("ArrowDown"); // and from the last back to the first
+  assert.equal(checkedPython(tabs.innerHTML), list[0]);
+  press("End");
+  assert.equal(checkedPython(tabs.innerHTML), list.at(-1));
+  press("Home");
+  assert.equal(checkedPython(tabs.innerHTML), list[0]);
+  assert.equal(context.document.activeElement.python, list[0]);
+  // Alt/Ctrl/Meta combinations and other keys are left alone.
+  assert.equal(press("ArrowRight", { altKey: true }), false);
+  assert.equal(press("a"), false);
+  assert.equal(checkedPython(tabs.innerHTML), list[0]);
+});
+
+test("clicking a Python (or Enter/Space on it) re-renders for it and keeps focus on it (#163)", async () => {
+  const { get, context } = await loadTabsPage();
+  const list = context.pythons();
+  const tabs = get("python-tabs");
+  tabs.handlers.click({ target: tabButton(list[2]) });
+  assert.equal(checkedPython(tabs.innerHTML), list[2]);
+  assert.equal(context.document.activeElement.python, list[2]);
+  assert.match(context.location.hash, new RegExp(`python=${list[2].replace(".", "\\.")}`));
+});
