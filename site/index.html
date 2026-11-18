@@ -397,6 +397,7 @@
           <a href="platforms/">Platforms</a>
           <a href="campaigns/">Campaigns</a>
           <a href="drops/">Dropped platforms</a>
+          <a href="new/">New wheels</a>
           <a href="https://wheelgap.github.io/wheels/">Gap wheels</a>
           <a href="https://github.com/wheelgap/tracker">Source code</a>
           <a href="https://github.com/wheelgap/wheelgap/discussions/43">Roadmap</a>
@@ -467,11 +468,18 @@
               <span>Clean JSON formatted for automation or scripting</span>
             </div>
           </button>
-          <a class="export-tile" href="data/coverage.csv" download>
+          <a class="export-tile" id="export-full-csv" href="data/coverage.csv" download>
             <span class="tile-icon">🌐</span>
             <div class="tile-content">
               <strong>Download Full Coverage CSV</strong>
               <span>Every package across every target (full dataset)</span>
+            </div>
+          </a>
+          <a class="export-tile" href="data/history.csv" download>
+            <span class="tile-icon" aria-hidden="true">📈</span>
+            <div class="tile-content">
+              <strong>Download Coverage History CSV</strong>
+              <span>One row per night and target</span>
             </div>
           </a>
         </div>

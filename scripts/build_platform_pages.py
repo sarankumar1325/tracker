@@ -25,8 +25,22 @@ SCAN_SCHEMA = 1
 OK = ("wheel", "bundled")  # counted as covered, as on the home page
 
 
-def _page(title: str, lede: str, meta: str, content: str, canonical: str, root: str) -> str:
+def _page(
+    title: str,
+    lede: str,
+    meta: str,
+    content: str,
+    canonical: str,
+    root: str,
+    feed_title: str | None = None,
+    feed_href: str | None = None,
+) -> str:
     e = html.escape
+    feed = (
+        f'\n  <link rel="alternate" type="application/atom+xml" title="{e(feed_title)}" href="{e(feed_href)}">'
+        if feed_title and feed_href
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -36,7 +50,7 @@ def _page(title: str, lede: str, meta: str, content: str, canonical: str, root: 
   <title>{e(title)}</title>
   <meta name="description" content="{e(lede, quote=True)}">
 {build_campaigns.og_tags(title, lede, canonical)}
-  <link rel="canonical" href="{e(canonical, quote=True)}">
+  <link rel="canonical" href="{e(canonical, quote=True)}">{feed}
   <link rel="stylesheet" href="{root}style.css">
   <link rel="icon" href="{root}favicon.svg" type="image/svg+xml">
 </head>
@@ -80,6 +94,24 @@ def _table(rows: list) -> str:
     )
 
 
+def _index_table(rows: list) -> str:
+    """The platform index: each platform's share of the top packages with a wheel, lowest first."""
+    e = html.escape
+    body = []
+    for friendly, platform, python, ok, percent, gaps in rows:
+        # Pyodide's share counts its own builds (`bundled`), as its page does.
+        share = f"{percent}% (wheel or Pyodide build)" if platform == "pyodide" else f"{percent}%"
+        body.append(
+            f'<tr><td><a href="{e(platform)}/">{e(friendly)}</a></td><td>{e(python)}</td>'
+            f"<td>{e(share)}</td><td>{gaps:,}</td></tr>"
+        )
+    return (
+        '<div class="matrix-scroll"><table class="matrix">'
+        "<thead><tr><th>Platform</th><th>Python</th><th>Share with a wheel</th><th>Packages without one</th></tr></thead>"
+        "<tbody>" + "".join(body) + "</tbody></table></div>"
+    )
+
+
 def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path | None = None) -> int:
     scan = json.loads(coverage_path.read_text(encoding="utf-8"))
     wanted = json.loads(wanted_path.read_text(encoding="utf-8"))
@@ -99,7 +131,7 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
     out = site / "platforms"
     out.mkdir(parents=True, exist_ok=True)
     urls = [f"{BASE}platforms/"]
-    index_links = []
+    index_rows = []  # (friendly, platform, python, ok, percent, gaps) for the index table
 
     for platform, friendly in build_pages.PLATFORM_NAMES.items():
         # The newest non-free-threaded Python this platform has a target for (Pyodide lags behind).
@@ -110,6 +142,7 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
         index = next(i for i, t in enumerate(targets) if t["python"] == python and t["platform"] == platform)
         label = targets[index]["label"]
         ok = sum(p["results"][index] in OK for p in packages)
+        gaps = sum(p["results"][index] in ("source", "missing") for p in packages)
         percent = f"{ok * 100 / total:.1f}" if total else "0.0"
         what = "a prebuilt wheel or a Pyodide build" if platform == "pyodide" else "a prebuilt wheel"
         lede = f"{ok:,} of the top {total:,} PyPI packages ({percent}%) have {what} on {friendly} for Python {python}."
@@ -135,15 +168,35 @@ def build(coverage_path: Path, wanted_path: Path, site: Path, config_path: Path 
         url = f"{BASE}platforms/{platform}/"
         folder = out / platform
         folder.mkdir(exist_ok=True)
-        (folder / "index.html").write_text(_page(title, lede, meta, content, url, "../../"), encoding="utf-8")
-        index_links.append(f'<li><a href="{e(platform)}/">{e(friendly)}</a></li>')
+        (folder / "index.html").write_text(
+            _page(
+                title,
+                lede,
+                meta,
+                content,
+                url,
+                "../../",
+                feed_title=f"New {platform} wheels",
+                feed_href=f"../../new/{platform}.xml",
+            ),
+            encoding="utf-8",
+        )
+        index_rows.append((friendly, platform, python, ok, percent, gaps))
         urls.append(url)
 
+    # Worst first, as on the home page's leaderboard; ties by name.
+    index_rows.sort(key=lambda row: (row[3] / total if total else 0.0, row[0]))
+    if index_rows:
+        worst = index_rows[0]
+        counting = ", counting Pyodide builds" if worst[1] == "pyodide" else ""  # its share counts `bundled`
+        lede = f"{worst[0]} has the fewest wheels: {worst[4]}% of the top {total:,} on Python {worst[2]}{counting}."
+    else:
+        lede = "The most-downloaded PyPI packages without a wheel, one page per platform."
     main = _page(
         "Wheel coverage by platform",
-        "The most-downloaded PyPI packages without a wheel, one page per platform.",
+        lede,
         meta,
-        "<section><h2>Platforms</h2><ul>" + "".join(index_links) + "</ul></section>",
+        f"<section><h2>Platforms</h2>{_index_table(index_rows)}</section>",
         f"{BASE}platforms/",
         "../",
     )
